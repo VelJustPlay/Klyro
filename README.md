@@ -6,7 +6,7 @@ Klyro is a lightweight Windows browser built with WPF and WebView2.
 
 Download and run `Klyro-win-Setup.exe` from the [latest GitHub release](https://github.com/VelJustPlay/Klyro/releases/latest).
 
-The updater is available in Velopack-installed copies of Klyro. Existing standalone `.exe` copies must be replaced once with the installer from a release before they can receive in-app updates.
+The updater is available in Velopack-installed copies of Klyro. Existing standalone `.exe` copies cannot self-update; run the installer once and use the installed Klyro shortcut to receive in-app updates.
 
 ## Publish an update
 
