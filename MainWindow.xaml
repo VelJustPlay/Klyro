@@ -101,7 +101,7 @@
       <RowDefinition Height="42" />
       <RowDefinition Height="52" />
       <RowDefinition Height="*" />
-      <RowDefinition Height="22" />
+      <RowDefinition Height="26" />
     </Grid.RowDefinitions>
 
         <Border x:Name="TabBar" Grid.Row="0" Background="{DynamicResource SurfaceBrush}"
@@ -291,7 +291,14 @@
       </DockPanel>
     </Border>
 
-    <TextBlock x:Name="StatusText" Grid.Row="3" Margin="10,1"
-               Foreground="{DynamicResource MutedTextBrush}" FontSize="11" Text="Ready" />
+    <DockPanel Grid.Row="3" Margin="10,1">
+      <Button x:Name="UpdateButton" DockPanel.Dock="Right" Content="Update available"
+              Height="22" Padding="8,0" FontSize="11" FontWeight="SemiBold"
+              Foreground="White" Background="{DynamicResource AccentGradientBrush}"
+              BorderThickness="0" Visibility="Collapsed" Click="UpdateButton_Click"
+              ToolTip="Download and install the latest Klyro update" />
+      <TextBlock x:Name="StatusText" VerticalAlignment="Center"
+                 Foreground="{DynamicResource MutedTextBrush}" FontSize="11" Text="Ready" />
+    </DockPanel>
   </Grid>
 </Window>

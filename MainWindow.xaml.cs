@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,12 +17,16 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
+using Velopack;
+using Velopack.Exceptions;
 
 namespace LightweightBrowser;
 
 public partial class MainWindow : Window
 {
     private static readonly TimeSpan RapidSiteChangeWindow = TimeSpan.FromSeconds(5);
+    private static readonly Uri UpdateFeedUri =
+        new("https://github.com/VelJustPlay/Klyro/releases/latest/download");
     private const int RapidSiteChangeThreshold = 3;
     private const double BrowserTabWidth = 180;
     private const double FullscreenChromeHeight = 94;
@@ -44,6 +49,7 @@ public partial class MainWindow : Window
     private BrowserTab? _draggedTab;
     private Point _dragStartPoint;
     private readonly DispatcherTimer _scrollAnimationTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
+    private readonly DispatcherTimer _updateCheckTimer = new() { Interval = TimeSpan.FromHours(6) };
     private readonly DispatcherTimer _fullscreenHideTimer = new() { Interval = TimeSpan.FromMilliseconds(900) };
     private readonly DispatcherTimer _fullscreenEdgeTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private ScrollViewer? _tabScrollViewer;
@@ -57,6 +63,10 @@ public partial class MainWindow : Window
     private WindowStyle _previousWindowStyle;
     private ResizeMode _previousResizeMode;
     private HwndSource? _windowSource;
+    private readonly UpdateManager _updateManager = new(UpdateFeedUri.AbsoluteUri);
+    private UpdateInfo? _availableUpdate;
+    private bool _isUpdateCheckInProgress;
+    private bool _isUpdateInstallInProgress;
 
     [DllImport("user32.dll")]
     private static extern short GetKeyState(int virtualKey);
@@ -133,6 +143,12 @@ public partial class MainWindow : Window
                 StatusText.Text = $"Could not load the local Klyro Search index: {exception.Message}";
             }
             _scrollAnimationTimer.Tick += ScrollAnimationTimer_Tick;
+            _updateCheckTimer.Tick += async (_, _) => await CheckForUpdatesAsync();
+            if (_updateManager.IsInstalled)
+            {
+                _ = CheckForUpdatesAsync();
+                _updateCheckTimer.Start();
+            }
             _fullscreenHideTimer.Tick += (_, _) =>
             {
                 _fullscreenHideTimer.Stop();
@@ -151,12 +167,65 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        _updateCheckTimer.Stop();
         foreach (var tab in _browserTabs.Where(tab => tab.IsNotes && tab.NoteIsModified))
         {
             if (ConfirmNoteChanges(tab))
                 continue;
             e.Cancel = true;
             return;
+        }
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        if (!_updateManager.IsInstalled || _isUpdateCheckInProgress)
+            return;
+
+        _isUpdateCheckInProgress = true;
+        try
+        {
+            _availableUpdate = await _updateManager.CheckForUpdatesAsync();
+            UpdateButton.Visibility = _availableUpdate is null ? Visibility.Collapsed : Visibility.Visible;
+            if (_availableUpdate is not null)
+                UpdateButton.ToolTip = $"Download and install Klyro {_availableUpdate.TargetFullRelease.Version}";
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or
+                                           TaskCanceledException or FormatException or InvalidOperationException or
+                                           AcquireLockFailedException or ChecksumFailedException or
+                                           NotInstalledException)
+        {
+            StatusText.Text = $"Could not check for updates: {exception.Message}";
+        }
+        finally
+        {
+            _isUpdateCheckInProgress = false;
+        }
+    }
+
+    private async void UpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_availableUpdate is null || _isUpdateInstallInProgress)
+            return;
+
+        _isUpdateInstallInProgress = true;
+        UpdateButton.IsEnabled = false;
+        UpdateButton.Content = "Downloading update...";
+        try
+        {
+            await _updateManager.DownloadUpdatesAsync(_availableUpdate);
+            StatusText.Text = "Installing update and restarting Klyro...";
+            _updateManager.ApplyUpdatesAndRestart(_availableUpdate.TargetFullRelease);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or
+                                           TaskCanceledException or FormatException or InvalidOperationException or
+                                           AcquireLockFailedException or ChecksumFailedException or
+                                           NotInstalledException)
+        {
+            StatusText.Text = $"Could not install update: {exception.Message}";
+            UpdateButton.Content = "Update available";
+            UpdateButton.IsEnabled = true;
+            _isUpdateInstallInProgress = false;
         }
     }
 
@@ -2109,7 +2178,7 @@ public partial class MainWindow : Window
             ResizeMode = _previousResizeMode;
             MainLayout.RowDefinitions[0].Height = new GridLength(42);
             MainLayout.RowDefinitions[1].Height = new GridLength(52);
-            MainLayout.RowDefinitions[3].Height = new GridLength(22);
+            MainLayout.RowDefinitions[3].Height = new GridLength(26);
             TabBar.Visibility = Visibility.Visible;
             NavigationBar.Visibility = Visibility.Visible;
             StatusText.Visibility = Visibility.Visible;
