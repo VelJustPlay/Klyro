@@ -1,0 +1,6 @@
+bin/
+obj/
+publish/
+rust-linux-browser/target/
+.vs/
+*.user
