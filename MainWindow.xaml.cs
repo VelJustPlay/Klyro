@@ -167,7 +167,6 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        _updateCheckTimer.Stop();
         foreach (var tab in _browserTabs.Where(tab => tab.IsNotes && tab.NoteIsModified))
         {
             if (ConfirmNoteChanges(tab))
@@ -175,6 +174,8 @@ public partial class MainWindow : Window
             e.Cancel = true;
             return;
         }
+
+        _updateCheckTimer.Stop();
     }
 
     private async Task CheckForUpdatesAsync()
