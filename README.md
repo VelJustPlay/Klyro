@@ -20,10 +20,10 @@ The in-app updater is available in Velopack-installed Windows copies. Standalone
 2. Create and push a version tag using `MAJOR.UPDATE.FIX`, for example:
 
    ```powershell
-   git tag v1.01.0
-   git push origin v1.01.0
+   git tag v1.01.1
+   git push origin v1.01.1
    ```
 
-3. GitHub Actions builds and publishes the Windows installer and update packages as a GitHub Release. Windows installed copies check for updates at startup and every six hours; when one is available, the **Update available** button appears in the browser's status bar.
+3. GitHub Actions builds and publishes the Windows installer and update packages as a GitHub Release. Windows installed copies check for updates at startup and every six hours; the installed version is always shown in the bottom-left status bar, and an update button appears only when a newer version is available.
 
 Use the first number for major releases, the middle number for larger updates (0–99), and the last number for small fixes (0–999). The release tag must increase from the previous release.

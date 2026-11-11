@@ -28,7 +28,7 @@ jobs:
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            throw "Release tag must use MAJOR.UPDATE.FIX, for example v1.01.0."
+            throw "Release tag must use MAJOR.UPDATE.FIX, for example v1.01.1."
           }
           $parts = $version.Split('.')
           if ([int]$parts[1] -gt 99 -or [int]$parts[2] -gt 999) {

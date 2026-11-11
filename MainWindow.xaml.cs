@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -74,6 +75,22 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        VersionText.Text = $"Klyro {GetDisplayVersion()}";
+    }
+
+    private static string GetDisplayVersion()
+    {
+        var informationalVersion = typeof(MainWindow).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(informationalVersion))
+        {
+            var metadataIndex = informationalVersion.IndexOf('+');
+            return metadataIndex >= 0
+                ? informationalVersion[..metadataIndex]
+                : informationalVersion;
+        }
+
+        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown";
     }
 
     private void MinimizeWindow_Click(object sender, RoutedEventArgs e) =>
@@ -180,21 +197,41 @@ public partial class MainWindow : Window
 
     private async Task CheckForUpdatesAsync()
     {
-        if (!_updateManager.IsInstalled || _isUpdateCheckInProgress)
+        if (_isUpdateCheckInProgress)
+            return;
+
+        _availableUpdate = null;
+        UpdateButton.Visibility = Visibility.Collapsed;
+        if (!_updateManager.IsInstalled)
             return;
 
         _isUpdateCheckInProgress = true;
         try
         {
-            _availableUpdate = await _updateManager.CheckForUpdatesAsync();
-            UpdateButton.Visibility = _availableUpdate is null ? Visibility.Collapsed : Visibility.Visible;
-            if (_availableUpdate is not null)
-                UpdateButton.ToolTip = $"Download and install Klyro {_availableUpdate.TargetFullRelease.Version}";
+            var update = await _updateManager.CheckForUpdatesAsync();
+            if (update is null)
+                return;
+
+            var installedVersion = _updateManager.CurrentVersion;
+            if (installedVersion is null)
+            {
+                StatusText.Text = "Could not determine the installed Klyro version.";
+                return;
+            }
+
+            if (update.TargetFullRelease.Version.CompareTo(installedVersion) <= 0)
+                return;
+
+            _availableUpdate = update;
+            var version = FormatKlyroVersion(update.TargetFullRelease.Version);
+            UpdateButtonLabel.Text = $"Update to {version}";
+            UpdateButton.ToolTip = $"Download and install Klyro {version}";
+            UpdateButton.Visibility = Visibility.Visible;
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or
                                            TaskCanceledException or FormatException or InvalidOperationException or
                                            AcquireLockFailedException or ChecksumFailedException or
-                                           NotInstalledException)
+                                           NotInstalledException or UnauthorizedAccessException or Win32Exception)
         {
             StatusText.Text = $"Could not check for updates: {exception.Message}";
         }
@@ -204,6 +241,12 @@ public partial class MainWindow : Window
         }
     }
 
+    private static string FormatKlyroVersion(SemanticVersion version)
+    {
+        var formattedVersion = $"{version.Major}.{version.Minor:D2}.{version.Patch}";
+        return version.IsPrerelease ? $"{formattedVersion}-{version.Release}" : formattedVersion;
+    }
+
     private async void UpdateButton_Click(object sender, RoutedEventArgs e)
     {
         if (_availableUpdate is null || _isUpdateInstallInProgress)
@@ -211,7 +254,7 @@ public partial class MainWindow : Window
 
         _isUpdateInstallInProgress = true;
         UpdateButton.IsEnabled = false;
-        UpdateButton.Content = "Downloading update...";
+        UpdateButtonLabel.Text = "Downloading update...";
         try
         {
             await _updateManager.DownloadUpdatesAsync(_availableUpdate);
@@ -221,12 +264,15 @@ public partial class MainWindow : Window
         catch (Exception exception) when (exception is HttpRequestException or IOException or
                                            TaskCanceledException or FormatException or InvalidOperationException or
                                            AcquireLockFailedException or ChecksumFailedException or
-                                           NotInstalledException)
+                                           NotInstalledException or UnauthorizedAccessException or Win32Exception)
         {
+            var version = FormatKlyroVersion(_availableUpdate.TargetFullRelease.Version);
             StatusText.Text = $"Could not install update: {exception.Message}";
-            UpdateButton.Content = "Update available";
+            UpdateButtonLabel.Text = $"Update to {version}";
             UpdateButton.IsEnabled = true;
             _isUpdateInstallInProgress = false;
+            MessageBox.Show(this, $"Could not install Klyro {version}: {exception.Message}",
+                "Klyro update failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 

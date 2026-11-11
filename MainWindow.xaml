@@ -65,6 +65,39 @@
         </Trigger>
       </Style.Triggers>
     </Style>
+    <Style x:Key="UpdateButtonStyle" TargetType="Button">
+      <Setter Property="Height" Value="22" />
+      <Setter Property="Padding" Value="9,0" />
+      <Setter Property="FontFamily" Value="Segoe UI" />
+      <Setter Property="Foreground" Value="#160D20" />
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="UpdateButtonSurface"
+                    Background="{TemplateBinding Background}"
+                    CornerRadius="6">
+              <ContentPresenter Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Margin="{TemplateBinding Padding}" RecognizesAccessKey="True" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="UpdateButtonSurface" Property="Background" Value="#D2ACFF" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="UpdateButtonSurface" Property="Background" Value="#A66BE8" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="UpdateButtonSurface" Property="Opacity" Value="0.58" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <GeometryGroup x:Key="KlyroMarkGeometry">
       <PathGeometry Figures="M 12,1 C 18,1 22,5 22,11 C 22,17 18,21 12,21 C 8,21 5,19 3,16 L 7,13 C 8,15 10,16 12,16 C 15,16 17,14 17,11 C 17,8 15,6 12,6 C 10,6 8,7 7,9 L 3,6 C 5,3 8,1 12,1 Z" />
       <PathGeometry Figures="M 1,10 L 9,10 L 12,12 L 9,14 L 1,14 L 4,12 Z" />
@@ -292,12 +325,18 @@
     </Border>
 
     <DockPanel Grid.Row="3" Margin="10,1">
-      <Button x:Name="UpdateButton" DockPanel.Dock="Right" Content="Update available"
-              Height="22" Padding="8,0" FontSize="11" FontWeight="SemiBold"
-              Foreground="White" Background="{DynamicResource AccentGradientBrush}"
-              BorderThickness="0" Visibility="Collapsed" Click="UpdateButton_Click"
-              ToolTip="Download and install the latest Klyro update" />
-      <TextBlock x:Name="StatusText" VerticalAlignment="Center"
+      <Button x:Name="UpdateButton" DockPanel.Dock="Right" Style="{StaticResource UpdateButtonStyle}"
+              FontSize="11" FontWeight="SemiBold" Visibility="Collapsed"
+              Click="UpdateButton_Click" ToolTip="Download and install the latest Klyro update"
+              AutomationProperties.Name="Update Klyro">
+        <TextBlock x:Name="UpdateButtonLabel" Text="Update available"
+                   FontFamily="Segoe UI" VerticalAlignment="Center" />
+      </Button>
+      <TextBlock x:Name="VersionText" DockPanel.Dock="Left" Margin="0,0,12,0"
+                 VerticalAlignment="Center" Foreground="{DynamicResource MutedTextBrush}"
+                 FontFamily="Segoe UI" FontSize="10" ToolTip="Installed Klyro version"
+                 AutomationProperties.Name="Installed Klyro version" />
+      <TextBlock x:Name="StatusText" DockPanel.Dock="Left" VerticalAlignment="Center"
                  Foreground="{DynamicResource MutedTextBrush}" FontSize="11" Text="Ready" />
     </DockPanel>
   </Grid>

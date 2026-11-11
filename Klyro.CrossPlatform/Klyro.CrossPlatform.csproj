@@ -4,9 +4,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>Klyro</AssemblyName>
     <RootNamespace>LightweightBrowser</RootNamespace>
-    <Version>1.01.0</Version>
-    <AssemblyVersion>1.01.0.0</AssemblyVersion>
-    <FileVersion>1.01.0.0</FileVersion>
+    <Version>1.01.1</Version>
+    <AssemblyVersion>1.01.1.0</AssemblyVersion>
+    <FileVersion>1.01.1.0</FileVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
