@@ -12,14 +12,15 @@
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>1.01.0</Version>
+    <AssemblyVersion>1.01.0.0</AssemblyVersion>
+    <FileVersion>1.01.0.0</FileVersion>
     <Company>Klyro</Company>
     <Product>Klyro</Product>
     <Description>Klyro lightweight web browser</Description>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="Klyro.CrossPlatform\**\*.cs" />
     <Resource Include="Assets\Klyro.ico" />
   </ItemGroup>
   <ItemGroup>

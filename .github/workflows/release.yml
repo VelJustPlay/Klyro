@@ -1,4 +1,4 @@
-name: Publish Klyro release
+name: Publish Klyro Windows release
 
 on:
   push:
@@ -23,12 +23,16 @@ jobs:
       - name: Install Velopack CLI
         run: dotnet tool install vpk --tool-path tools --version 1.2.161
 
-      - name: Build installer and update packages
+      - name: Build Windows installer and update packages
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            throw "Release tag must contain a semantic version, for example v1.0.1."
+            throw "Release tag must use MAJOR.UPDATE.FIX, for example v1.01.0."
+          }
+          $parts = $version.Split('.')
+          if ([int]$parts[1] -gt 99 -or [int]$parts[2] -gt 999) {
+            throw "UPDATE must be between 0 and 99, and FIX must be between 0 and 999."
           }
 
           dotnet publish LightweightBrowser.csproj `

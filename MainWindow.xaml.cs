@@ -359,13 +359,15 @@ public partial class MainWindow : Window
             try
             {
                 await EnsureBrowserInitializedAsync(tab);
-                if (tab.WebView is { } webView &&
+                if (!tab.IsClosing && _browserTabs.Contains(tab) &&
+                    tab.WebView is { } webView &&
                     Uri.TryCreate(tab.PendingAddress, UriKind.Absolute, out var initialUri))
                     webView.Source = initialUri;
             }
             catch (Exception exception)
             {
-                StatusText.Text = DescribeBrowserEngineError(exception);
+                if (!tab.IsClosing)
+                    StatusText.Text = DescribeBrowserEngineError(exception);
             }
         }
         else
@@ -1056,7 +1058,11 @@ public partial class MainWindow : Window
         if (tab.WebView is null)
         {
             tab.WebView = new WebView2();
-            tab.WebView.CoreWebView2InitializationCompleted += (_, args) => ConfigureBrowser(tab, args);
+            tab.WebView.CoreWebView2InitializationCompleted += (_, args) =>
+            {
+                if (!tab.IsClosing)
+                    ConfigureBrowser(tab, args);
+            };
         }
 
         if (!BrowserHost.Children.Contains(tab.WebView))
@@ -1066,7 +1072,7 @@ public partial class MainWindow : Window
         var initializationTask = tab.InitializationTask;
         if (initializationTask is null)
         {
-            initializationTask = InitializeBrowserTabAsync(webView);
+            initializationTask = InitializeBrowserTabAsync(webView, tab.InitializationCancellation.Token);
             tab.InitializationTask = initializationTask;
         }
 
@@ -1082,9 +1088,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task InitializeBrowserTabAsync(WebView2 webView)
+    private async Task InitializeBrowserTabAsync(WebView2 webView, CancellationToken cancellationToken)
     {
-        await WaitForWebViewLoadedAsync(webView);
+        await WaitForWebViewLoadedAsync(webView, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         var environmentTask = _environmentTask ??= CreateBrowserEnvironmentAsync();
         try
         {
@@ -1097,6 +1104,7 @@ public partial class MainWindow : Window
             throw;
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         await webView.EnsureCoreWebView2Async(_environment);
     }
 
@@ -1107,19 +1115,27 @@ public partial class MainWindow : Window
         return await CoreWebView2Environment.CreateAsync(null, profileFolder);
     }
 
-    private static Task WaitForWebViewLoadedAsync(WebView2 webView)
+    private static Task WaitForWebViewLoadedAsync(WebView2 webView, CancellationToken cancellationToken)
     {
         if (webView.IsLoaded)
             return Task.CompletedTask;
+        cancellationToken.ThrowIfCancellationRequested();
 
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         RoutedEventHandler? loadedHandler = null;
+        CancellationTokenRegistration cancellationRegistration = default;
         loadedHandler = (_, _) =>
         {
             webView.Loaded -= loadedHandler;
+            cancellationRegistration.Dispose();
             completion.TrySetResult();
         };
         webView.Loaded += loadedHandler;
+        cancellationRegistration = cancellationToken.Register(() =>
+        {
+            webView.Loaded -= loadedHandler;
+            completion.TrySetCanceled(cancellationToken);
+        });
         return completion.Task;
     }
 
@@ -1214,6 +1230,8 @@ public partial class MainWindow : Window
 
         var details = $"WebView2 initialization failed. {exception.GetType().Name}: {exception.Message} " +
                       $"HRESULT: 0x{exception.HResult:X8}. Runtime: {runtimeVersion}.";
+        if (runtimeVersion.StartsWith("not found", StringComparison.OrdinalIgnoreCase))
+            details += " Install the Microsoft Edge WebView2 Evergreen Runtime to use Klyro on this Windows installation.";
         var logPath = Path.Combine(_dataFolder, "webview2-error.log");
         try
         {
@@ -1833,6 +1851,7 @@ public partial class MainWindow : Window
         var favicon = new BitmapImage();
         favicon.BeginInit();
         favicon.CacheOption = BitmapCacheOption.OnLoad;
+        favicon.DecodePixelWidth = 32;
         favicon.StreamSource = faviconStream;
         favicon.EndInit();
         favicon.Freeze();
@@ -1921,10 +1940,10 @@ public partial class MainWindow : Window
         if (tab.IsNotes && !ConfirmNoteChanges(tab))
             return;
 
+        tab.IsClosing = true;
         var duration = MotionDuration(140);
         if (duration != TimeSpan.Zero)
         {
-            tab.IsClosing = true;
             tab.CloseButton.IsEnabled = false;
             var fadeOut = new DoubleAnimation(tab.Item.Opacity, 0, duration)
             {
@@ -1943,7 +1962,15 @@ public partial class MainWindow : Window
 
     private void RemoveTab(BrowserTab tab)
     {
-        BrowserHost.Children.Remove(tab.WebView);
+        tab.IsClosing = true;
+        tab.InitializationCancellation.Cancel();
+        if (tab.WebView is { } webView)
+        {
+            BrowserHost.Children.Remove(webView);
+            tab.WebView = null;
+            webView.Dispose();
+        }
+        tab.InitializationCancellation.Dispose();
         if (tab.NotesPanel is not null)
             BrowserHost.Children.Remove(tab.NotesPanel);
         Tabs.Items.Remove(tab.Item);
@@ -2456,6 +2483,7 @@ public partial class MainWindow : Window
         public bool NoteIsModified { get; set; }
         public WebView2? WebView { get; set; }
         public Task? InitializationTask { get; set; }
+        public CancellationTokenSource InitializationCancellation { get; } = new();
         public bool IsClosing { get; set; }
     }
 
