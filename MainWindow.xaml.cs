@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using ICSharpCode.AvalonEdit;
+using ICSharpCode.AvalonEdit.Highlighting;
 using System.Net.Http;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -31,6 +33,10 @@ public partial class MainWindow : Window
         new("https://github.com/VelJustPlay/Klyro/releases/latest/download");
     private const int RapidSiteChangeThreshold = 3;
     private const int MaxTerminalOutputCharacters = 100_000;
+    private const int MaxTerminalOutputLines = 5_000;
+    private static readonly Brush TerminalNormalBrush = new SolidColorBrush(Color.FromRgb(220, 220, 220));
+    private static readonly Brush TerminalWarningBrush = new SolidColorBrush(Color.FromRgb(250, 204, 21));
+    private static readonly Brush TerminalErrorBrush = new SolidColorBrush(Color.FromRgb(248, 113, 113));
     private const double BrowserTabWidth = 180;
     private const double FullscreenChromeHeight = 94;
     private static readonly HashSet<string> AuthenticationHosts = new(StringComparer.OrdinalIgnoreCase)
@@ -48,6 +54,7 @@ public partial class MainWindow : Window
     private string CSharpWorkspacePath => Path.Combine(_dataFolder, "CSharpWorkspace");
     private string CSharpProjectPath => Path.Combine(CSharpWorkspacePath, "Klyro.Code.csproj");
     private string CSharpProgramPath => Path.Combine(CSharpWorkspacePath, "Program.cs");
+    private string CSharpProgramNamePath => Path.Combine(CSharpWorkspacePath, "ProgramName.txt");
     private KlyroSearchIndex? _searchIndex;
     private CoreWebView2Environment? _environment;
     private Task<CoreWebView2Environment>? _environmentTask;
@@ -767,37 +774,68 @@ public partial class MainWindow : Window
         tab.CodeRunButton = CreateWorkspaceActionButton("Run", "Build and run Program.cs (F5)",
             () => RunCSharpCode(tab), true);
         actions.Children.Add(tab.CodeRunButton);
+        tab.CodeDownloadButton = CreateWorkspaceActionButton("Download .exe", "Build a self-contained executable",
+            () => _ = DownloadCSharpProgramAsync(tab));
+        actions.Children.Add(tab.CodeDownloadButton);
         DockPanel.SetDock(actions, Dock.Right);
         toolbar.Children.Add(actions);
+        var programDetails = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        programDetails.Children.Add(new TextBlock
+        {
+            Text = "Program",
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0),
+            Foreground = (Brush)FindResource("MutedTextBrush"),
+            FontSize = 11
+        });
+        tab.CodeProgramNameBox = new TextBox
+        {
+            Width = 138,
+            Padding = new Thickness(8, 5, 8, 5),
+            Margin = new Thickness(0, 0, 10, 0),
+            Background = (Brush)FindResource("SurfaceAltBrush"),
+            Foreground = (Brush)FindResource("PrimaryTextBrush"),
+            BorderBrush = (Brush)FindResource("BorderBrush"),
+            CaretBrush = (Brush)FindResource("AccentBrush"),
+            ToolTip = "Name used for the downloaded executable"
+        };
+        tab.CodeProgramNameBox.Text = File.ReadAllText(CSharpProgramNamePath).Trim();
+        tab.CodeProgramNameBox.TextChanged += (_, _) =>
+        {
+            tab.CodeIsModified = true;
+            UpdateCodeTabTitle(tab);
+        };
+        programDetails.Children.Add(tab.CodeProgramNameBox);
         var filePath = new TextBlock
         {
-            Text = Path.Combine(CSharpWorkspacePath, "Program.cs"),
+            Text = "Program.cs",
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = (Brush)FindResource("MutedTextBrush"),
             FontSize = 11,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            ToolTip = CSharpWorkspacePath
+            ToolTip = CSharpProgramPath
         };
-        toolbar.Children.Add(filePath);
+        programDetails.Children.Add(filePath);
+        toolbar.Children.Add(programDetails);
         Grid.SetRow(toolbar, 1);
         panel.Children.Add(toolbar);
 
-        tab.CodeEditor = new TextBox
+        tab.CodeEditor = new TextEditor
         {
-            AcceptsReturn = true,
-            AcceptsTab = true,
-            TextWrapping = TextWrapping.NoWrap,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Padding = new Thickness(16),
+            ShowLineNumbers = true,
+            WordWrap = false,
             Background = Brushes.Transparent,
             Foreground = new SolidColorBrush(Color.FromRgb(225, 222, 235)),
-            BorderThickness = new Thickness(0),
-            CaretBrush = (Brush)FindResource("AccentBrush"),
-            SelectionBrush = new SolidColorBrush(Color.FromRgb(92, 63, 130)),
             FontFamily = new FontFamily("Consolas"),
-            FontSize = 13
+            FontSize = 13,
+            SyntaxHighlighting = HighlightingManager.Instance.GetDefinition("C#")
         };
+        tab.CodeEditor.Options.IndentationSize = 4;
+        tab.CodeEditor.TextArea.SelectionBrush = new SolidColorBrush(Color.FromRgb(92, 63, 130));
         tab.CodeEditor.Text = File.ReadAllText(CSharpProgramPath);
         tab.CodeEditor.TextChanged += (_, _) =>
         {
@@ -821,23 +859,21 @@ public partial class MainWindow : Window
         terminal.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         terminal.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         terminal.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        tab.TerminalOutputBox = new TextBox
+        tab.TerminalOutputBox = new RichTextBox
         {
             IsReadOnly = true,
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Background = Brushes.Transparent,
-            Foreground = new SolidColorBrush(Color.FromRgb(205, 202, 216)),
             BorderThickness = new Thickness(0),
             Padding = new Thickness(2, 8, 2, 8),
             FontFamily = new FontFamily("Consolas"),
             FontSize = 12,
-            Text = "Terminal ready. Run the file or enter a .NET command below."
+            Document = new FlowDocument { PagePadding = new Thickness(0) }
         };
+        AppendTerminalOutput(tab, "Terminal ready. Run the file or enter a .NET command below.");
         var terminalHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
         var clearButton = CreateWorkspaceActionButton("Clear", "Clear terminal output",
-            () => tab.TerminalOutputBox.Clear());
+            () => ClearTerminalOutput(tab));
         DockPanel.SetDock(clearButton, Dock.Right);
         terminalHeader.Children.Add(clearButton);
         terminalHeader.Children.Add(new TextBlock
@@ -888,7 +924,7 @@ public partial class MainWindow : Window
 
         var terminalFrame = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(12, 11, 16)),
+            Background = Brushes.Black,
             BorderBrush = (Brush)FindResource("BorderBrush"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
@@ -915,6 +951,9 @@ public partial class MainWindow : Window
     private void InitializeCSharpWorkspace(BrowserTab tab)
     {
         Directory.CreateDirectory(CSharpWorkspacePath);
+        if (!File.Exists(CSharpProgramNamePath) ||
+            string.IsNullOrWhiteSpace(File.ReadAllText(CSharpProgramNamePath)))
+            File.WriteAllText(CSharpProgramNamePath, "MyProgram", new UTF8Encoding(false));
         if (!File.Exists(CSharpProjectPath))
         {
             File.WriteAllText(CSharpProjectPath,
@@ -965,11 +1004,14 @@ public partial class MainWindow : Window
 
         try
         {
+            var programName = GetSafeProgramName(tab.CodeProgramNameBox!.Text);
             File.WriteAllText(tab.CodeFilePath, tab.CodeEditor.Text, new UTF8Encoding(false));
+            File.WriteAllText(CSharpProgramNamePath, programName, new UTF8Encoding(false));
+            tab.CodeProgramNameBox.Text = programName;
             tab.CodeIsModified = false;
             UpdateCodeTabTitle(tab);
-            tab.CodeStatusText!.Text = $"Saved {Path.GetFileName(tab.CodeFilePath)}";
-            StatusText.Text = $"Saved {tab.CodeFilePath}";
+            tab.CodeStatusText!.Text = "Workspace saved.";
+            StatusText.Text = $"Saved C# workspace in {CSharpWorkspacePath}";
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            ArgumentException or NotSupportedException)
@@ -985,8 +1027,8 @@ public partial class MainWindow : Window
             return true;
 
         var result = MessageBox.Show(this,
-            "Save changes to Program.cs before continuing?",
-            "Unsaved C# code", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+            "Save changes to the C# workspace before continuing?",
+            "Unsaved C# workspace", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
         if (result == MessageBoxResult.Yes)
         {
             SaveCSharpCode(tab);
@@ -1041,7 +1083,7 @@ public partial class MainWindow : Window
         process.ErrorDataReceived += (_, args) =>
         {
             if (args.Data is { } line)
-                _ = Dispatcher.BeginInvoke(() => AppendTerminalOutput(tab, line));
+                _ = Dispatcher.BeginInvoke(() => AppendTerminalOutput(tab, line, isError: true));
         };
         process.Exited += (_, _) =>
         {
@@ -1079,8 +1121,169 @@ public partial class MainWindow : Window
             process.Dispose();
             tab.CodeRunButton!.IsEnabled = true;
             tab.CodeStatusText!.Text = $"Could not run C#: {exception.Message}";
-            AppendTerminalOutput(tab, $"Could not run C#: {exception.Message}");
+            AppendTerminalOutput(tab, $"Could not run C#: {exception.Message}", isError: true);
         }
+    }
+
+    private async Task DownloadCSharpProgramAsync(BrowserTab tab)
+    {
+        if (tab.CodePublishProcess is { HasExited: false })
+        {
+            tab.CodeStatusText!.Text = "A download is already being built.";
+            return;
+        }
+
+        if (tab.CodeIsModified)
+            SaveCSharpCode(tab);
+        if (tab.CodeIsModified)
+            return;
+
+        string programName;
+        try
+        {
+            programName = GetSafeProgramName(tab.CodeProgramNameBox!.Text);
+        }
+        catch (ArgumentException exception)
+        {
+            tab.CodeStatusText!.Text = exception.Message;
+            AppendTerminalOutput(tab, $"Download failed: {exception.Message}", isError: true);
+            return;
+        }
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(userProfile))
+        {
+            tab.CodeStatusText!.Text = "Could not locate your Downloads folder.";
+            AppendTerminalOutput(tab, "Download failed: the user profile folder is unavailable.", isError: true);
+            return;
+        }
+
+        var downloadsFolder = Path.Combine(userProfile, "Downloads");
+        var outputDirectory = Path.Combine(CSharpWorkspacePath, $".publish-{Guid.NewGuid():N}");
+        Process? process = null;
+        tab.CodeDownloadButton!.IsEnabled = false;
+        tab.CodeStatusText!.Text = "Building a self-contained Windows executable...";
+        AppendTerminalOutput(tab, $"> dotnet publish ({programName}.exe)");
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                WorkingDirectory = CSharpWorkspacePath,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            };
+            startInfo.ArgumentList.Add("publish");
+            startInfo.ArgumentList.Add(CSharpProjectPath);
+            startInfo.ArgumentList.Add("--configuration");
+            startInfo.ArgumentList.Add("Release");
+            startInfo.ArgumentList.Add("--runtime");
+            startInfo.ArgumentList.Add("win-x64");
+            startInfo.ArgumentList.Add("--self-contained");
+            startInfo.ArgumentList.Add("true");
+            startInfo.ArgumentList.Add("--output");
+            startInfo.ArgumentList.Add(outputDirectory);
+            startInfo.ArgumentList.Add("-p:PublishSingleFile=true");
+            startInfo.ArgumentList.Add("-p:IncludeNativeLibrariesForSelfExtract=true");
+            startInfo.ArgumentList.Add("-p:EnableCompressionInSingleFile=true");
+            startInfo.ArgumentList.Add($"-p:AssemblyName={programName}");
+
+            process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+            process.OutputDataReceived += (_, args) =>
+            {
+                if (args.Data is { } line)
+                    _ = Dispatcher.BeginInvoke(() => AppendTerminalOutput(tab, line));
+            };
+            process.ErrorDataReceived += (_, args) =>
+            {
+                if (args.Data is { } line)
+                    _ = Dispatcher.BeginInvoke(() => AppendTerminalOutput(tab, line, isError: true));
+            };
+            if (!process.Start())
+                throw new InvalidOperationException("The .NET publish process could not be started.");
+
+            tab.CodePublishProcess = process;
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            await process.WaitForExitAsync();
+            process.WaitForExit();
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException($"dotnet publish exited with code {process.ExitCode}.");
+
+            var builtExecutable = Path.Combine(outputDirectory, $"{programName}.exe");
+            if (!File.Exists(builtExecutable))
+                throw new FileNotFoundException("The publish output did not contain the expected executable.",
+                    builtExecutable);
+
+            Directory.CreateDirectory(downloadsFolder);
+            var downloadPath = GetAvailableDownloadPath(downloadsFolder, $"{programName}.exe");
+            File.Copy(builtExecutable, downloadPath);
+            AddCompletedFileToDownloads(downloadPath);
+            tab.CodeStatusText!.Text = $"Downloaded {Path.GetFileName(downloadPath)}";
+            StatusText.Text = $"Downloaded {downloadPath}";
+            AppendTerminalOutput(tab, $"Download complete: {downloadPath}");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           ArgumentException or NotSupportedException or InvalidOperationException or
+                                           System.ComponentModel.Win32Exception)
+        {
+            tab.CodeStatusText!.Text = $"Could not download program: {exception.Message}";
+            AppendTerminalOutput(tab, $"Download failed: {exception.Message}", isError: true);
+        }
+        finally
+        {
+            if (ReferenceEquals(tab.CodePublishProcess, process))
+                tab.CodePublishProcess = null;
+            process?.Dispose();
+            tab.CodeDownloadButton!.IsEnabled = true;
+            if (Directory.Exists(outputDirectory))
+            {
+                try
+                {
+                    Directory.Delete(outputDirectory, recursive: true);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    tab.CodeStatusText!.Text = $"Temporary publish files could not be removed: {exception.Message}";
+                    AppendTerminalOutput(tab, $"Warning: temporary publish files remain at {outputDirectory}",
+                        isWarning: true);
+                }
+            }
+        }
+    }
+
+    private static string GetSafeProgramName(string name)
+    {
+        name = name.Trim();
+        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            name = name[..^4];
+
+        var invalidCharacters = Path.GetInvalidFileNameChars();
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 80 ||
+            name.IndexOfAny(invalidCharacters) >= 0 || name.EndsWith(".", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Use a program name of 1–80 characters without file-name symbols.");
+        }
+
+        var reservedName = name.Split('.')[0];
+        if (reservedName.Equals("CON", StringComparison.OrdinalIgnoreCase) ||
+            reservedName.Equals("PRN", StringComparison.OrdinalIgnoreCase) ||
+            reservedName.Equals("AUX", StringComparison.OrdinalIgnoreCase) ||
+            reservedName.Equals("NUL", StringComparison.OrdinalIgnoreCase) ||
+            (reservedName.Length == 4 &&
+             (reservedName.StartsWith("COM", StringComparison.OrdinalIgnoreCase) ||
+              reservedName.StartsWith("LPT", StringComparison.OrdinalIgnoreCase)) &&
+             reservedName[3] is >= '1' and <= '9')
+        )
+        {
+            throw new ArgumentException("That program name is reserved by Windows.");
+        }
+
+        return name;
     }
 
     private void RunTerminalCommand(BrowserTab tab)
@@ -1093,7 +1296,7 @@ public partial class MainWindow : Window
         if (command.Equals("cls", StringComparison.OrdinalIgnoreCase) ||
             command.Equals("clear", StringComparison.OrdinalIgnoreCase))
         {
-            tab.TerminalOutputBox!.Clear();
+            ClearTerminalOutput(tab);
             return;
         }
 
@@ -1108,7 +1311,7 @@ public partial class MainWindow : Window
                                            System.ComponentModel.Win32Exception or UnauthorizedAccessException)
         {
             tab.CodeStatusText!.Text = $"Terminal error: {exception.Message}";
-            AppendTerminalOutput(tab, $"Terminal error: {exception.Message}");
+            AppendTerminalOutput(tab, $"Terminal error: {exception.Message}", isError: true);
         }
     }
 
@@ -1140,7 +1343,7 @@ public partial class MainWindow : Window
         process.ErrorDataReceived += (_, args) =>
         {
             if (args.Data is { } line)
-                _ = Dispatcher.BeginInvoke(() => AppendTerminalOutput(tab, line));
+                _ = Dispatcher.BeginInvoke(() => AppendTerminalOutput(tab, line, isError: true));
         };
         process.Exited += (_, _) => _ = Dispatcher.BeginInvoke(() =>
         {
@@ -1165,14 +1368,84 @@ public partial class MainWindow : Window
         return process;
     }
 
-    private void AppendTerminalOutput(BrowserTab tab, string text)
+    private void AppendTerminalOutput(
+        BrowserTab tab,
+        string text,
+        bool isError = false,
+        bool isWarning = false)
     {
         if (tab.TerminalOutputBox is not { } output || tab.IsClosing)
             return;
-        output.AppendText(text + Environment.NewLine);
-        if (output.Text.Length > MaxTerminalOutputCharacters)
-            output.Text = output.Text[^MaxTerminalOutputCharacters..];
+        if (text.Length > MaxTerminalOutputCharacters)
+            text = text[^MaxTerminalOutputCharacters..];
+
+        var isWarningLine = isWarning ||
+                            text.Contains("warning", StringComparison.OrdinalIgnoreCase);
+        var isErrorLine = !isWarningLine && (isError ||
+                          text.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                          text.Contains("exception", StringComparison.OrdinalIgnoreCase));
+        var paragraph = new Paragraph(new Run(text)
+        {
+            Foreground = isWarningLine
+                ? TerminalWarningBrush
+                : isErrorLine
+                    ? TerminalErrorBrush
+                    : TerminalNormalBrush
+        })
+        {
+            Margin = new Thickness(0)
+        };
+        output.Document.Blocks.Add(paragraph);
+        while (output.Document.Blocks.Count > 1 &&
+               new TextRange(output.Document.ContentStart, output.Document.ContentEnd).Text.Length >
+               MaxTerminalOutputCharacters)
+        {
+            if (output.Document.Blocks.FirstBlock is not { } firstBlock)
+                break;
+            output.Document.Blocks.Remove(firstBlock);
+        }
         output.ScrollToEnd();
+    }
+
+    private static void ClearTerminalOutput(BrowserTab tab)
+    {
+        tab.TerminalOutputBox?.Document.Blocks.Clear();
+    }
+
+    private void AddCompletedFileToDownloads(string filePath)
+    {
+        var nameText = new TextBlock
+        {
+            Text = Path.GetFileName(filePath),
+            Foreground = (Brush)FindResource("PrimaryTextBrush"),
+            FontWeight = FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var stateText = new TextBlock
+        {
+            Text = $"Saved to {Path.GetDirectoryName(filePath)}",
+            Foreground = (Brush)FindResource("MutedTextBrush"),
+            FontSize = 11,
+            Margin = new Thickness(0, 3, 0, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var openButton = new Button
+        {
+            Content = "Open",
+            Padding = new Thickness(8, 2, 8, 2),
+            ToolTip = "Open downloaded program"
+        };
+        openButton.Click += (_, _) => OpenFile(filePath, stateText);
+        var row = new StackPanel { Margin = new Thickness(0, 4, 0, 8) };
+        var heading = new DockPanel();
+        DockPanel.SetDock(openButton, Dock.Right);
+        heading.Children.Add(openButton);
+        heading.Children.Add(nameText);
+        row.Children.Add(heading);
+        row.Children.Add(stateText);
+        DownloadsList.Children.Insert(0, row);
+        AnimateDownloadPanel(true);
+        AnimateElementIn(row, 8, 190);
     }
 
     private void OpenCSharpWorkspaceFolder(BrowserTab tab)
@@ -1191,6 +1464,7 @@ public partial class MainWindow : Window
     private bool StopCodeProcesses(BrowserTab tab)
     {
         return StopCodeProcess(tab, tab.CodeRunProcess, "C# program") &&
+               StopCodeProcess(tab, tab.CodePublishProcess, "C# publish") &&
                StopCodeProcess(tab, tab.TerminalProcess, "terminal");
     }
 
@@ -1904,7 +2178,7 @@ public partial class MainWindow : Window
     private static string GetAvailableDownloadPath(string folder, string fileName)
     {
         var candidate = Path.Combine(folder, fileName);
-        if (!File.Exists(candidate))
+        if (!File.Exists(candidate) && !Directory.Exists(candidate))
             return candidate;
 
         var baseName = Path.GetFileNameWithoutExtension(fileName);
@@ -1912,7 +2186,7 @@ public partial class MainWindow : Window
         for (var index = 1; ; index++)
         {
             candidate = Path.Combine(folder, $"{baseName} ({index}){extension}");
-            if (!File.Exists(candidate))
+            if (!File.Exists(candidate) && !Directory.Exists(candidate))
                 return candidate;
         }
     }
@@ -3128,14 +3402,17 @@ public partial class MainWindow : Window
         public TextBlock? NoteStatusText { get; set; }
         public string? NoteFilePath { get; set; }
         public bool NoteIsModified { get; set; }
-        public TextBox? CodeEditor { get; set; }
-        public TextBox? TerminalOutputBox { get; set; }
+        public TextEditor? CodeEditor { get; set; }
+        public TextBox? CodeProgramNameBox { get; set; }
+        public RichTextBox? TerminalOutputBox { get; set; }
         public TextBox? TerminalCommandBox { get; set; }
         public TextBlock? CodeStatusText { get; set; }
         public Button? CodeRunButton { get; set; }
+        public Button? CodeDownloadButton { get; set; }
         public string? CodeFilePath { get; set; }
         public Process? TerminalProcess { get; set; }
         public Process? CodeRunProcess { get; set; }
+        public Process? CodePublishProcess { get; set; }
         public WebView2? WebView { get; set; }
         public Task? InitializationTask { get; set; }
         public CancellationTokenSource InitializationCancellation { get; } = new();

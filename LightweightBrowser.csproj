@@ -24,6 +24,7 @@
     <Resource Include="Assets\Klyro.ico" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
     <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>

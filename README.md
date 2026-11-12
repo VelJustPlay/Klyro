@@ -18,7 +18,7 @@ The in-app updater is available in Velopack-installed Windows copies. Standalone
 
 Use the **+** button for a browser tab or the adjacent tab-type menu to open a browser tab, Notes, or a C# workspace. Notes supports formatted text and saving or opening `.txt` and `.rtf` files.
 
-The C# workspace is available in the Windows desktop app. It creates a console project and `Program.cs` under `%LOCALAPPDATA%\LightBrowser\CSharpWorkspace`. It requires the .NET 10 SDK. Edit and save with **Ctrl+S**, run the program with **F5**, or enter commands in the integrated terminal.
+The C# workspace is available in the Windows desktop app. It creates a console project and `Program.cs` under `%LOCALAPPDATA%\LightBrowser\CSharpWorkspace`. It requires the .NET 10 SDK. The editor highlights C# syntax, and the black terminal colors warnings and errors for readability. Set the program name and choose **Download .exe** to publish a self-contained executable to your Downloads folder. Edit and save with **Ctrl+S**, run the program with **F5**, or enter commands in the integrated terminal.
 
 ## Publish a release
 
