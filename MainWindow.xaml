@@ -98,6 +98,70 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <Style x:Key="TabTypeChoiceButtonStyle" TargetType="Button">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ChoiceSurface" Background="{TemplateBinding Background}" CornerRadius="7">
+              <ContentPresenter Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ChoiceSurface" Property="Background" Value="#282431" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ChoiceSurface" Property="Background" Value="#393342" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="WorkspaceActionButtonStyle" TargetType="Button">
+      <Setter Property="Padding" Value="11,6" />
+      <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ActionSurface" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6">
+              <ContentPresenter Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ActionSurface" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ActionSurface" Property="Opacity" Value="0.78" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="ActionSurface" Property="Opacity" Value="0.55" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="WorkspacePrimaryButtonStyle" TargetType="Button"
+           BasedOn="{StaticResource WorkspaceActionButtonStyle}">
+      <Setter Property="Foreground" Value="#160D20" />
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
     <GeometryGroup x:Key="KlyroMarkGeometry">
       <PathGeometry Figures="M 12,1 C 18,1 22,5 22,11 C 22,17 18,21 12,21 C 8,21 5,19 3,16 L 7,13 C 8,15 10,16 12,16 C 15,16 17,14 17,11 C 17,8 15,6 12,6 C 10,6 8,7 7,9 L 3,6 C 5,3 8,1 12,1 Z" />
       <PathGeometry Figures="M 1,10 L 9,10 L 12,12 L 9,14 L 1,14 L 4,12 Z" />
@@ -152,9 +216,11 @@
         <Button DockPanel.Dock="Right" Content="+" Width="32" Padding="0" FontSize="18"
                 ToolTip="New tab (Ctrl+T)" Click="NewTab_Click"
                 shell:WindowChrome.IsHitTestVisibleInChrome="True" />
-        <Button DockPanel.Dock="Right" Content="▤" Width="32" Padding="0" FontSize="16"
-                ToolTip="New notes tab" AutomationProperties.Name="New notes tab"
-                Click="NewNotesTab_Click" shell:WindowChrome.IsHitTestVisibleInChrome="True" />
+        <Button x:Name="TabTypePickerButton" DockPanel.Dock="Right" Content="⌄" Width="28"
+                Padding="0" FontSize="13" ToolTip="Choose a new tab type"
+                AutomationProperties.Name="Choose a new tab type"
+                Click="TabTypePickerButton_Click"
+                shell:WindowChrome.IsHitTestVisibleInChrome="True" />
         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="2,0,14,0">
           <Border Width="25" Height="25" CornerRadius="8" Background="{DynamicResource AccentGradientBrush}"
                   RenderTransformOrigin="0.5,0.5">
@@ -323,6 +389,39 @@
         </ScrollViewer>
       </DockPanel>
     </Border>
+
+    <Popup x:Name="TabTypePopup" Placement="Bottom"
+           PlacementTarget="{Binding ElementName=TabTypePickerButton}"
+           StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+      <Border Width="236" Padding="6" Background="{DynamicResource SurfaceBrush}"
+              BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10">
+        <StackPanel>
+          <TextBlock Text="OPEN A NEW TAB" Margin="10,7,10,5" FontSize="10"
+                     FontWeight="SemiBold" Foreground="{DynamicResource MutedTextBrush}" />
+          <Button Style="{StaticResource TabTypeChoiceButtonStyle}" Click="NewBrowserTab_Click">
+            <StackPanel>
+              <TextBlock Text="Browser tab" FontWeight="SemiBold" />
+              <TextBlock Text="Browse the web" Margin="0,2,0,0" FontSize="11"
+                         Foreground="{DynamicResource MutedTextBrush}" />
+            </StackPanel>
+          </Button>
+          <Button Style="{StaticResource TabTypeChoiceButtonStyle}" Click="NewCSharpTab_Click">
+            <StackPanel>
+              <TextBlock Text="C# workspace" FontWeight="SemiBold" />
+              <TextBlock Text="Write and run .NET code" Margin="0,2,0,0" FontSize="11"
+                         Foreground="{DynamicResource MutedTextBrush}" />
+            </StackPanel>
+          </Button>
+          <Button Style="{StaticResource TabTypeChoiceButtonStyle}" Click="NewNotesTab_Click">
+            <StackPanel>
+              <TextBlock Text="Notes" FontWeight="SemiBold" />
+              <TextBlock Text="Create a formatted note" Margin="0,2,0,0" FontSize="11"
+                         Foreground="{DynamicResource MutedTextBrush}" />
+            </StackPanel>
+          </Button>
+        </StackPanel>
+      </Border>
+    </Popup>
 
     <DockPanel Grid.Row="3" Margin="10,1">
       <Button x:Name="UpdateButton" DockPanel.Dock="Right" Style="{StaticResource UpdateButtonStyle}"

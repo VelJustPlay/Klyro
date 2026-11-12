@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -29,6 +30,7 @@ public partial class MainWindow : Window
     private static readonly Uri UpdateFeedUri =
         new("https://github.com/VelJustPlay/Klyro/releases/latest/download");
     private const int RapidSiteChangeThreshold = 3;
+    private const int MaxTerminalOutputCharacters = 100_000;
     private const double BrowserTabWidth = 180;
     private const double FullscreenChromeHeight = 94;
     private static readonly HashSet<string> AuthenticationHosts = new(StringComparer.OrdinalIgnoreCase)
@@ -43,6 +45,9 @@ public partial class MainWindow : Window
     private readonly string _dataFolder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LightBrowser");
     private string HistoryFilePath => Path.Combine(_dataFolder, "history.json");
+    private string CSharpWorkspacePath => Path.Combine(_dataFolder, "CSharpWorkspace");
+    private string CSharpProjectPath => Path.Combine(CSharpWorkspacePath, "Klyro.Code.csproj");
+    private string CSharpProgramPath => Path.Combine(CSharpWorkspacePath, "Program.cs");
     private KlyroSearchIndex? _searchIndex;
     private CoreWebView2Environment? _environment;
     private Task<CoreWebView2Environment>? _environmentTask;
@@ -192,6 +197,22 @@ public partial class MainWindow : Window
             return;
         }
 
+        foreach (var tab in _browserTabs.Where(tab => tab.IsCode && tab.CodeIsModified))
+        {
+            if (ConfirmCodeChanges(tab))
+                continue;
+            e.Cancel = true;
+            return;
+        }
+
+        foreach (var tab in _browserTabs.Where(tab => tab.IsCode))
+        {
+            if (StopCodeProcesses(tab))
+                continue;
+            e.Cancel = true;
+            return;
+        }
+
         _updateCheckTimer.Stop();
     }
 
@@ -280,12 +301,14 @@ public partial class MainWindow : Window
         string address,
         bool select,
         string? originatingSiteHost = null,
-        bool isNotes = false)
+        bool isNotes = false,
+        bool isCode = false)
     {
         var tab = new BrowserTab(address)
         {
             CurrentSiteHost = originatingSiteHost,
-            IsNotes = isNotes
+            IsNotes = isNotes,
+            IsCode = isCode
         };
         var header = new StackPanel { Orientation = Orientation.Horizontal };
         tab.FaviconImage = new Image
@@ -299,7 +322,7 @@ public partial class MainWindow : Window
         };
         tab.TitleLabel = new TextBlock
         {
-            Text = isNotes ? "Notes" : "New tab",
+            Text = isNotes ? "Notes" : isCode ? "C#" : "New tab",
             VerticalAlignment = VerticalAlignment.Center,
             MaxWidth = 120,
             TextTrimming = TextTrimming.CharacterEllipsis
@@ -334,13 +357,17 @@ public partial class MainWindow : Window
         header.Children.Add(tab.TitleLabel);
         header.Children.Add(tab.CloseButton);
         tab.Item.Header = header;
-        tab.Item.ToolTip = isNotes ? "Notes" : "New tab";
+        tab.Item.ToolTip = isNotes ? "Notes" : isCode ? "C# workspace" : "New tab";
         if (isNotes)
         {
             tab.FaviconImage.Visibility = Visibility.Collapsed;
             tab.NotesPanel = BuildNotesPanel(tab);
             tab.TitleLabel.Text = tab.NoteNameBox?.Text ?? "Notes";
             tab.Item.ToolTip = tab.TitleLabel.Text;
+        }
+        else if (isCode)
+        {
+            tab.CodePanel = BuildCSharpPanel(tab);
         }
         _browserTabs.Add(tab);
         Tabs.Items.Add(tab.Item);
@@ -352,6 +379,8 @@ public partial class MainWindow : Window
             tab.Item.BringIntoView();
             if (isNotes)
                 tab.NoteEditor?.Focus();
+            else if (isCode)
+                tab.CodeEditor?.Focus();
             else
             {
                 AddressBox.Focus();
@@ -363,14 +392,20 @@ public partial class MainWindow : Window
     private async Task ActivateTabAsync(BrowserTab tab)
     {
         BrowserHost.Children.Clear();
-        if (tab.IsNotes)
+        if (tab.IsNotes || tab.IsCode)
         {
             EmptyPage.Visibility = Visibility.Collapsed;
             BrowserHost.Visibility = Visibility.Visible;
-            AddressBox.Text = "Notes";
+            AddressBox.Text = tab.IsCode ? "C# workspace" : "Notes";
             AddressBox.IsEnabled = false;
-            BrowserHost.Children.Add(tab.NotesPanel!);
-            _ = Dispatcher.BeginInvoke(() => tab.NoteEditor?.Focus(), DispatcherPriority.Input);
+            BrowserHost.Children.Add(tab.IsCode ? tab.CodePanel! : tab.NotesPanel!);
+            _ = Dispatcher.BeginInvoke(() =>
+            {
+                if (tab.IsCode)
+                    tab.CodeEditor?.Focus();
+                else
+                    tab.NoteEditor?.Focus();
+            }, DispatcherPriority.Input);
             return;
         }
 
@@ -428,19 +463,27 @@ public partial class MainWindow : Window
 
     private FrameworkElement BuildNotesPanel(BrowserTab tab)
     {
-        var panel = new Grid { Margin = new Thickness(28, 20, 28, 22) };
+        var panel = new Grid { Margin = new Thickness(28, 18, 28, 20) };
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var heading = new TextBlock
+        var heading = new StackPanel { Margin = new Thickness(0, 0, 0, 2) };
+        heading.Children.Add(new TextBlock
         {
-            Text = "Quick notes",
+            Text = "Notes",
             FontSize = 22,
             FontWeight = FontWeights.SemiBold,
             Foreground = (Brush)FindResource("PrimaryTextBrush")
-        };
+        });
+        heading.Children.Add(new TextBlock
+        {
+            Text = "A calm space for ideas, links, and quick thoughts.",
+            Margin = new Thickness(0, 3, 0, 0),
+            FontSize = 12,
+            Foreground = (Brush)FindResource("MutedTextBrush")
+        });
         panel.Children.Add(heading);
 
         var details = new Grid { Margin = new Thickness(0, 14, 0, 10) };
@@ -488,8 +531,17 @@ public partial class MainWindow : Window
         tab.NoteFormatBox.SelectedIndex = 0;
         Grid.SetColumn(tab.NoteFormatBox, 3);
         details.Children.Add(tab.NoteFormatBox);
-        Grid.SetRow(details, 1);
-        panel.Children.Add(details);
+        var detailsCard = new Border
+        {
+            Background = (Brush)FindResource("SurfaceBrush"),
+            BorderBrush = (Brush)FindResource("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12, 10, 12, 10),
+            Child = details
+        };
+        Grid.SetRow(detailsCard, 1);
+        panel.Children.Add(detailsCard);
 
         var editorArea = new DockPanel();
         var fileToolbar = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
@@ -610,11 +662,10 @@ public partial class MainWindow : Window
             AcceptsTab = true,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Padding = new Thickness(14),
-            Background = (Brush)FindResource("SurfaceBrush"),
+            Padding = new Thickness(16),
+            Background = Brushes.Transparent,
             Foreground = (Brush)FindResource("PrimaryTextBrush"),
-            BorderBrush = (Brush)FindResource("BorderBrush"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0),
             CaretBrush = (Brush)FindResource("AccentBrush"),
             FontFamily = new FontFamily("Segoe UI"),
             FontSize = 14
@@ -630,19 +681,23 @@ public partial class MainWindow : Window
             UpdateNoteStatistics(tab);
         };
         tab.NoteEditor.SelectionChanged += (_, _) => UpdateNoteStatistics(tab);
-        editorArea.Children.Add(tab.NoteEditor);
+        editorArea.Children.Add(new Border
+        {
+            Background = (Brush)FindResource("SurfaceBrush"),
+            BorderBrush = (Brush)FindResource("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(4),
+            Child = tab.NoteEditor
+        });
         Grid.SetRow(editorArea, 2);
         panel.Children.Add(editorArea);
 
         var footer = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
-        var saveButton = new Button
-        {
-            Content = "Save to Downloads",
-            Padding = new Thickness(14, 7, 14, 7),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            IsDefault = false
-        };
-        saveButton.Click += (_, _) => SaveNote(tab);
+        var saveButton = CreateWorkspaceActionButton("Save note", "Save note to Downloads",
+            () => SaveNote(tab), true);
+        saveButton.HorizontalAlignment = HorizontalAlignment.Right;
+        saveButton.IsDefault = false;
         DockPanel.SetDock(saveButton, Dock.Right);
         footer.Children.Add(saveButton);
         tab.NoteStatusText = new TextBlock
@@ -672,14 +727,504 @@ public partial class MainWindow : Window
         return panel;
     }
 
+    private FrameworkElement BuildCSharpPanel(BrowserTab tab)
+    {
+        InitializeCSharpWorkspace(tab);
+
+        var panel = new Grid { Margin = new Thickness(24, 18, 24, 18) };
+        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(230) });
+
+        var heading = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+        heading.Children.Add(new TextBlock
+        {
+            Text = "C# workspace",
+            FontSize = 21,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = (Brush)FindResource("PrimaryTextBrush")
+        });
+        heading.Children.Add(new TextBlock
+        {
+            Text = "Edit Program.cs and run it with the installed .NET SDK.",
+            Margin = new Thickness(0, 3, 0, 0),
+            FontSize = 12,
+            Foreground = (Brush)FindResource("MutedTextBrush")
+        });
+        panel.Children.Add(heading);
+
+        var toolbar = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        actions.Children.Add(CreateWorkspaceActionButton("Open folder", "Open the C# workspace folder",
+            () => OpenCSharpWorkspaceFolder(tab)));
+        actions.Children.Add(CreateWorkspaceActionButton("Save", "Save Program.cs (Ctrl+S)",
+            () => SaveCSharpCode(tab)));
+        tab.CodeRunButton = CreateWorkspaceActionButton("Run", "Build and run Program.cs (F5)",
+            () => RunCSharpCode(tab), true);
+        actions.Children.Add(tab.CodeRunButton);
+        DockPanel.SetDock(actions, Dock.Right);
+        toolbar.Children.Add(actions);
+        var filePath = new TextBlock
+        {
+            Text = Path.Combine(CSharpWorkspacePath, "Program.cs"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = (Brush)FindResource("MutedTextBrush"),
+            FontSize = 11,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            ToolTip = CSharpWorkspacePath
+        };
+        toolbar.Children.Add(filePath);
+        Grid.SetRow(toolbar, 1);
+        panel.Children.Add(toolbar);
+
+        tab.CodeEditor = new TextBox
+        {
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            TextWrapping = TextWrapping.NoWrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Padding = new Thickness(16),
+            Background = Brushes.Transparent,
+            Foreground = new SolidColorBrush(Color.FromRgb(225, 222, 235)),
+            BorderThickness = new Thickness(0),
+            CaretBrush = (Brush)FindResource("AccentBrush"),
+            SelectionBrush = new SolidColorBrush(Color.FromRgb(92, 63, 130)),
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 13
+        };
+        tab.CodeEditor.Text = File.ReadAllText(CSharpProgramPath);
+        tab.CodeEditor.TextChanged += (_, _) =>
+        {
+            tab.CodeIsModified = true;
+            UpdateCodeTabTitle(tab);
+        };
+        var editorFrame = new Border
+        {
+            Background = (Brush)FindResource("SurfaceBrush"),
+            BorderBrush = (Brush)FindResource("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(1),
+            Child = tab.CodeEditor
+        };
+        Grid.SetRow(editorFrame, 2);
+        panel.Children.Add(editorFrame);
+
+        var terminal = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        terminal.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        terminal.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        terminal.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        terminal.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        tab.TerminalOutputBox = new TextBox
+        {
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Background = Brushes.Transparent,
+            Foreground = new SolidColorBrush(Color.FromRgb(205, 202, 216)),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(2, 8, 2, 8),
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 12,
+            Text = "Terminal ready. Run the file or enter a .NET command below."
+        };
+        var terminalHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+        var clearButton = CreateWorkspaceActionButton("Clear", "Clear terminal output",
+            () => tab.TerminalOutputBox.Clear());
+        DockPanel.SetDock(clearButton, Dock.Right);
+        terminalHeader.Children.Add(clearButton);
+        terminalHeader.Children.Add(new TextBlock
+        {
+            Text = "TERMINAL",
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 10,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = (Brush)FindResource("MutedTextBrush")
+        });
+        Grid.SetRow(terminalHeader, 0);
+        terminal.Children.Add(terminalHeader);
+        Grid.SetRow(tab.TerminalOutputBox, 1);
+        terminal.Children.Add(tab.TerminalOutputBox);
+
+        var prompt = new DockPanel { Margin = new Thickness(0, 5, 0, 0) };
+        prompt.Children.Add(new TextBlock
+        {
+            Text = ">",
+            Margin = new Thickness(0, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = (Brush)FindResource("AccentBrush"),
+            FontFamily = new FontFamily("Consolas"),
+            FontWeight = FontWeights.Bold
+        });
+        tab.TerminalCommandBox = new TextBox
+        {
+            MinHeight = 28,
+            Padding = new Thickness(7, 4, 7, 4),
+            Background = (Brush)FindResource("SurfaceAltBrush"),
+            Foreground = (Brush)FindResource("PrimaryTextBrush"),
+            BorderBrush = (Brush)FindResource("BorderBrush"),
+            CaretBrush = (Brush)FindResource("AccentBrush"),
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 12,
+            ToolTip = "Enter a command, for example dotnet --info"
+        };
+        tab.TerminalCommandBox.KeyDown += (_, args) =>
+        {
+            if (args.Key != Key.Enter)
+                return;
+            RunTerminalCommand(tab);
+            args.Handled = true;
+        };
+        prompt.Children.Add(tab.TerminalCommandBox);
+        Grid.SetRow(prompt, 2);
+        terminal.Children.Add(prompt);
+
+        var terminalFrame = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(12, 11, 16)),
+            BorderBrush = (Brush)FindResource("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(12),
+            Child = terminal
+        };
+        Grid.SetRow(terminalFrame, 3);
+        panel.Children.Add(terminalFrame);
+
+        tab.CodeStatusText = new TextBlock
+        {
+            Text = "Ready",
+            Margin = new Thickness(0, 7, 0, 0),
+            Foreground = (Brush)FindResource("MutedTextBrush"),
+            FontSize = 10
+        };
+        DockPanel.SetDock(tab.CodeStatusText, Dock.Bottom);
+        terminal.Children.Add(tab.CodeStatusText);
+        Grid.SetRow(tab.CodeStatusText, 3);
+
+        return panel;
+    }
+
+    private void InitializeCSharpWorkspace(BrowserTab tab)
+    {
+        Directory.CreateDirectory(CSharpWorkspacePath);
+        if (!File.Exists(CSharpProjectPath))
+        {
+            File.WriteAllText(CSharpProjectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\">" + Environment.NewLine +
+                "  <PropertyGroup>" + Environment.NewLine +
+                "    <OutputType>Exe</OutputType>" + Environment.NewLine +
+                "    <TargetFramework>net10.0</TargetFramework>" + Environment.NewLine +
+                "    <ImplicitUsings>enable</ImplicitUsings>" + Environment.NewLine +
+                "    <Nullable>enable</Nullable>" + Environment.NewLine +
+                "  </PropertyGroup>" + Environment.NewLine +
+                "</Project>" + Environment.NewLine,
+                new UTF8Encoding(false));
+        }
+
+        if (!File.Exists(CSharpProgramPath))
+        {
+            File.WriteAllText(CSharpProgramPath,
+                "Console.WriteLine(\"Hello from Klyro!\");" + Environment.NewLine,
+                new UTF8Encoding(false));
+        }
+
+        tab.CodeFilePath = CSharpProgramPath;
+    }
+
+    private Button CreateWorkspaceActionButton(
+        string text,
+        string toolTip,
+        Action action,
+        bool isPrimary = false)
+    {
+        var button = new Button
+        {
+            Content = text,
+            ToolTip = toolTip,
+            Margin = new Thickness(0, 0, 6, 0),
+            Style = (Style)FindResource(isPrimary
+                ? "WorkspacePrimaryButtonStyle"
+                : "WorkspaceActionButtonStyle")
+        };
+        button.Click += (_, _) => action();
+        return button;
+    }
+
+    private void SaveCSharpCode(BrowserTab tab)
+    {
+        if (tab.CodeEditor is null || tab.CodeFilePath is null)
+            return;
+
+        try
+        {
+            File.WriteAllText(tab.CodeFilePath, tab.CodeEditor.Text, new UTF8Encoding(false));
+            tab.CodeIsModified = false;
+            UpdateCodeTabTitle(tab);
+            tab.CodeStatusText!.Text = $"Saved {Path.GetFileName(tab.CodeFilePath)}";
+            StatusText.Text = $"Saved {tab.CodeFilePath}";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           ArgumentException or NotSupportedException)
+        {
+            tab.CodeStatusText!.Text = $"Could not save: {exception.Message}";
+            StatusText.Text = $"Could not save C# file: {exception.Message}";
+        }
+    }
+
+    private bool ConfirmCodeChanges(BrowserTab tab)
+    {
+        if (!tab.CodeIsModified)
+            return true;
+
+        var result = MessageBox.Show(this,
+            "Save changes to Program.cs before continuing?",
+            "Unsaved C# code", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+        if (result == MessageBoxResult.Yes)
+        {
+            SaveCSharpCode(tab);
+            return !tab.CodeIsModified;
+        }
+        return result == MessageBoxResult.No;
+    }
+
+    private void UpdateCodeTabTitle(BrowserTab tab)
+    {
+        tab.TitleLabel.Text = tab.CodeIsModified ? "Program.cs *" : "Program.cs";
+        tab.Item.ToolTip = tab.CodeIsModified
+            ? $"{tab.CodeFilePath} — unsaved changes"
+            : tab.CodeFilePath;
+    }
+
+    private void RunCSharpCode(BrowserTab tab)
+    {
+        if (tab.CodeRunProcess is { HasExited: false })
+        {
+            tab.CodeStatusText!.Text = "Program is already running.";
+            return;
+        }
+
+        if (tab.CodeIsModified)
+            SaveCSharpCode(tab);
+        if (tab.CodeIsModified)
+            return;
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = CSharpWorkspacePath,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+        startInfo.ArgumentList.Add("run");
+        startInfo.ArgumentList.Add("--no-launch-profile");
+        startInfo.ArgumentList.Add("--project");
+        startInfo.ArgumentList.Add(CSharpProjectPath);
+
+        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        process.OutputDataReceived += (_, args) =>
+        {
+            if (args.Data is { } line)
+                _ = Dispatcher.BeginInvoke(() => AppendTerminalOutput(tab, line));
+        };
+        process.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is { } line)
+                _ = Dispatcher.BeginInvoke(() => AppendTerminalOutput(tab, line));
+        };
+        process.Exited += (_, _) =>
+        {
+            var exitCode = process.ExitCode;
+            _ = Dispatcher.BeginInvoke(() =>
+            {
+                if (ReferenceEquals(tab.CodeRunProcess, process))
+                    tab.CodeRunProcess = null;
+                if (!tab.IsClosing)
+                {
+                    tab.CodeRunButton!.IsEnabled = true;
+                    tab.CodeStatusText!.Text = exitCode == 0
+                        ? "Run completed."
+                        : $"Run failed with exit code {exitCode}.";
+                }
+                process.Dispose();
+            });
+        };
+
+        try
+        {
+            AppendTerminalOutput(tab, "> dotnet run");
+            if (!process.Start())
+                throw new InvalidOperationException("The .NET process could not be started.");
+            tab.CodeRunProcess = process;
+            tab.CodeRunButton!.IsEnabled = false;
+            tab.CodeStatusText!.Text = "Building and running...";
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or
+                                           System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+        {
+            tab.CodeRunProcess = null;
+            process.Dispose();
+            tab.CodeRunButton!.IsEnabled = true;
+            tab.CodeStatusText!.Text = $"Could not run C#: {exception.Message}";
+            AppendTerminalOutput(tab, $"Could not run C#: {exception.Message}");
+        }
+    }
+
+    private void RunTerminalCommand(BrowserTab tab)
+    {
+        var command = tab.TerminalCommandBox?.Text.Trim();
+        if (string.IsNullOrEmpty(command))
+            return;
+
+        tab.TerminalCommandBox!.Clear();
+        if (command.Equals("cls", StringComparison.OrdinalIgnoreCase) ||
+            command.Equals("clear", StringComparison.OrdinalIgnoreCase))
+        {
+            tab.TerminalOutputBox!.Clear();
+            return;
+        }
+
+        try
+        {
+            var process = EnsureTerminalProcess(tab);
+            AppendTerminalOutput(tab, $"> {command}");
+            process.StandardInput.WriteLine(command);
+            process.StandardInput.Flush();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or
+                                           System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+        {
+            tab.CodeStatusText!.Text = $"Terminal error: {exception.Message}";
+            AppendTerminalOutput(tab, $"Terminal error: {exception.Message}");
+        }
+    }
+
+    private Process EnsureTerminalProcess(BrowserTab tab)
+    {
+        if (tab.TerminalProcess is { HasExited: false } runningProcess)
+            return runningProcess;
+
+        tab.TerminalProcess?.Dispose();
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+            Arguments = "/Q /D",
+            WorkingDirectory = CSharpWorkspacePath,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        process.OutputDataReceived += (_, args) =>
+        {
+            if (args.Data is { } line)
+                _ = Dispatcher.BeginInvoke(() => AppendTerminalOutput(tab, line));
+        };
+        process.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is { } line)
+                _ = Dispatcher.BeginInvoke(() => AppendTerminalOutput(tab, line));
+        };
+        process.Exited += (_, _) => _ = Dispatcher.BeginInvoke(() =>
+        {
+            if (ReferenceEquals(tab.TerminalProcess, process))
+                tab.TerminalProcess = null;
+            if (!tab.IsClosing)
+                tab.CodeStatusText!.Text = "Terminal session ended.";
+            process.Dispose();
+        });
+
+        if (!process.Start())
+        {
+            process.Dispose();
+            throw new InvalidOperationException("The .NET terminal could not be started.");
+        }
+
+        tab.TerminalProcess = process;
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        tab.CodeStatusText!.Text = $"Terminal: {CSharpWorkspacePath}";
+        AppendTerminalOutput(tab, $"Klyro terminal — {CSharpWorkspacePath}");
+        return process;
+    }
+
+    private void AppendTerminalOutput(BrowserTab tab, string text)
+    {
+        if (tab.TerminalOutputBox is not { } output || tab.IsClosing)
+            return;
+        output.AppendText(text + Environment.NewLine);
+        if (output.Text.Length > MaxTerminalOutputCharacters)
+            output.Text = output.Text[^MaxTerminalOutputCharacters..];
+        output.ScrollToEnd();
+    }
+
+    private void OpenCSharpWorkspaceFolder(BrowserTab tab)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(CSharpWorkspacePath) { UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or
+                                           System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+        {
+            tab.CodeStatusText!.Text = $"Could not open workspace folder: {exception.Message}";
+        }
+    }
+
+    private bool StopCodeProcesses(BrowserTab tab)
+    {
+        return StopCodeProcess(tab, tab.CodeRunProcess, "C# program") &&
+               StopCodeProcess(tab, tab.TerminalProcess, "terminal");
+    }
+
+    private bool StopCodeProcess(BrowserTab tab, Process? process, string processName)
+    {
+        if (process is null)
+            return true;
+
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            if (ReferenceEquals(tab.CodeRunProcess, process))
+                tab.CodeRunProcess = null;
+            if (ReferenceEquals(tab.TerminalProcess, process))
+                tab.TerminalProcess = null;
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or
+                                           System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            tab.CodeStatusText!.Text = $"Could not stop {processName}: {exception.Message}";
+            return false;
+        }
+    }
+
     private Button CreateNoteActionButton(string text, string toolTip, Action action)
     {
         var button = new Button
         {
             Content = text,
             ToolTip = toolTip,
-            Padding = new Thickness(8, 4, 8, 4),
-            Margin = new Thickness(0, 0, 4, 0)
+            Margin = new Thickness(0, 0, 5, 5),
+            Style = (Style)FindResource("WorkspaceActionButtonStyle")
         };
         button.Click += (_, _) => action();
         return button;
@@ -1499,9 +2044,11 @@ public partial class MainWindow : Window
         var tab = SelectedTab();
         if (tab is null || string.IsNullOrWhiteSpace(input))
             return;
-        if (tab.IsNotes)
+        if (tab.IsNotes || tab.IsCode)
         {
-            StatusText.Text = "Open a browser tab to visit a website.";
+            StatusText.Text = tab.IsCode
+                ? "Use the C# terminal to run .NET commands, or open a browser tab to visit a website."
+                : "Open a browser tab to visit a website.";
             return;
         }
 
@@ -1857,9 +2404,9 @@ public partial class MainWindow : Window
     {
         if (Tabs.SelectedItem != tab.Item || AddressBox.IsKeyboardFocusWithin)
             return;
-        if (tab.IsNotes)
+        if (tab.IsNotes || tab.IsCode)
         {
-            AddressBox.Text = "Notes";
+            AddressBox.Text = tab.IsCode ? "C# workspace" : "Notes";
             return;
         }
         if (tab.SearchQuery is { } query)
@@ -1985,6 +2532,10 @@ public partial class MainWindow : Window
             return;
         if (tab.IsNotes && !ConfirmNoteChanges(tab))
             return;
+        if (tab.IsCode && !ConfirmCodeChanges(tab))
+            return;
+        if (tab.IsCode && !StopCodeProcesses(tab))
+            return;
 
         tab.IsClosing = true;
         var duration = MotionDuration(140);
@@ -2019,6 +2570,8 @@ public partial class MainWindow : Window
         tab.InitializationCancellation.Dispose();
         if (tab.NotesPanel is not null)
             BrowserHost.Children.Remove(tab.NotesPanel);
+        if (tab.CodePanel is not null)
+            BrowserHost.Children.Remove(tab.CodePanel);
         Tabs.Items.Remove(tab.Item);
         _browserTabs.Remove(tab);
         UpdateTabWidths();
@@ -2028,8 +2581,36 @@ public partial class MainWindow : Window
 
     private void NewTab_Click(object sender, RoutedEventArgs e) => CreateTab("", true);
 
-    private void NewNotesTab_Click(object sender, RoutedEventArgs e) =>
+    private void NewNotesTab_Click(object sender, RoutedEventArgs e)
+    {
+        TabTypePopup.IsOpen = false;
         CreateTab("", true, isNotes: true);
+    }
+
+    private void TabTypePickerButton_Click(object sender, RoutedEventArgs e) =>
+        TabTypePopup.IsOpen = !TabTypePopup.IsOpen;
+
+    private void NewBrowserTab_Click(object sender, RoutedEventArgs e)
+    {
+        TabTypePopup.IsOpen = false;
+        CreateTab("", true);
+    }
+
+    private void NewCSharpTab_Click(object sender, RoutedEventArgs e)
+    {
+        TabTypePopup.IsOpen = false;
+        try
+        {
+            CreateTab("", true, isCode: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           ArgumentException or NotSupportedException)
+        {
+            StatusText.Text = $"Could not open the C# workspace: {exception.Message}";
+            MessageBox.Show(this, $"Could not open the C# workspace: {exception.Message}",
+                "C# workspace error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -2161,9 +2742,26 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (e.Key == Key.F5 && SelectedTab() is { IsCode: true } runTab)
+        {
+            RunCSharpCode(runTab);
+            e.Handled = true;
+            return;
+        }
+
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0 &&
             (Keyboard.Modifiers & ModifierKeys.Alt) == 0)
         {
+            if (SelectedTab() is { IsCode: true } codeTab)
+            {
+                if (e.Key == Key.S)
+                {
+                    SaveCSharpCode(codeTab);
+                    e.Handled = true;
+                    return;
+                }
+            }
+
             if (SelectedTab() is { IsNotes: true } notesTab)
             {
                 switch (e.Key)
@@ -2375,7 +2973,7 @@ public partial class MainWindow : Window
     {
         if (SelectedTab() is not { } tab)
             return;
-        if (tab.IsNotes)
+        if (tab.IsNotes || tab.IsCode)
             return;
 
         tab.PendingAddress = "";
@@ -2508,6 +3106,8 @@ public partial class MainWindow : Window
     {
         public string PendingAddress { get; set; } = address;
         public bool IsNotes { get; set; }
+        public bool IsCode { get; set; }
+        public bool CodeIsModified { get; set; }
         public string? CurrentSiteHost { get; set; }
         public string? UserEnteredHost { get; set; }
         public string? NavigationDeniedMessage { get; set; }
@@ -2521,12 +3121,21 @@ public partial class MainWindow : Window
         public Image FaviconImage { get; set; } = null!;
         public Button CloseButton { get; set; } = null!;
         public FrameworkElement? NotesPanel { get; set; }
+        public FrameworkElement? CodePanel { get; set; }
         public TextBox? NoteNameBox { get; set; }
         public ComboBox? NoteFormatBox { get; set; }
         public RichTextBox? NoteEditor { get; set; }
         public TextBlock? NoteStatusText { get; set; }
         public string? NoteFilePath { get; set; }
         public bool NoteIsModified { get; set; }
+        public TextBox? CodeEditor { get; set; }
+        public TextBox? TerminalOutputBox { get; set; }
+        public TextBox? TerminalCommandBox { get; set; }
+        public TextBlock? CodeStatusText { get; set; }
+        public Button? CodeRunButton { get; set; }
+        public string? CodeFilePath { get; set; }
+        public Process? TerminalProcess { get; set; }
+        public Process? CodeRunProcess { get; set; }
         public WebView2? WebView { get; set; }
         public Task? InitializationTask { get; set; }
         public CancellationTokenSource InitializationCancellation { get; } = new();
