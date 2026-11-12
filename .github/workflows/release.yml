@@ -27,8 +27,8 @@ jobs:
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            throw "Release tag must use MAJOR.UPDATE.FIX, for example v1.01.1."
+          if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw "Release tag must use canonical SemVer without leading zeroes, for example v1.1.2."
           }
           $parts = $version.Split('.')
           if ([int]$parts[1] -gt 99 -or [int]$parts[2] -gt 999) {

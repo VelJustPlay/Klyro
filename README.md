@@ -17,13 +17,13 @@ The in-app updater is available in Velopack-installed Windows copies. Standalone
 ## Publish a release
 
 1. Push the code changes to `main`.
-2. Create and push a version tag using `MAJOR.UPDATE.FIX`, for example:
+2. Create and push a canonical SemVer tag using `MAJOR.UPDATE.FIX`, without leading zeroes, for example:
 
    ```powershell
-   git tag v1.01.1
-   git push origin v1.01.1
+   git tag v1.1.2
+   git push origin v1.1.2
    ```
 
 3. GitHub Actions builds and publishes the Windows installer and update packages as a GitHub Release. Windows installed copies check for updates at startup and every six hours; the installed version is always shown in the bottom-left status bar, and an update button appears only when a newer version is available.
 
-Use the first number for major releases, the middle number for larger updates (0–99), and the last number for small fixes (0–999). The release tag must increase from the previous release.
+Use the first number for major releases, the middle number for larger updates (0–99), and the last number for small fixes (0–999). SemVer rejects leading zeroes, so use `1.1.2`, not `1.01.2`. The release tag must increase from the previous release.
