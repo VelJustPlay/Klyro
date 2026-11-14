@@ -110,10 +110,21 @@ jobs:
           Type=Application
           Name=Klyro
           Exec=Klyro
+          Icon=Klyro
           Categories=Network;WebBrowser;
           Terminal=false
           EOF
           cp AppDir/usr/share/applications/Klyro.desktop AppDir/Klyro.desktop
+          cat > AppDir/Klyro.svg <<'EOF'
+          <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+            <rect x="16" y="16" width="224" height="224" rx="40" fill="#172033"/>
+            <rect x="48" y="56" width="160" height="144" rx="16" fill="#f3f6fb"/>
+            <path d="M48 72a16 16 0 0 1 16-16h128a16 16 0 0 1 16 16v16H48z" fill="#48b6d9"/>
+            <circle cx="68" cy="72" r="5" fill="#172033"/>
+            <circle cx="88" cy="72" r="5" fill="#172033"/>
+            <path d="M96 112v48m0-24 44-24m-44 24 48 24" fill="none" stroke="#172033" stroke-linecap="round" stroke-linejoin="round" stroke-width="14"/>
+          </svg>
+          EOF
           curl --fail --location --retry 3 \
             https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
             --output appimagetool
@@ -128,7 +139,8 @@ jobs:
           if-no-files-found: error
 
   macos:
-    runs-on: macos-14
+    if: github.ref_name != 'v1.3.2'
+    runs-on: macos-15-intel
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -188,6 +200,7 @@ jobs:
 
   release:
     needs: [windows, linux, macos]
+    if: always() && needs.windows.result == 'success' && needs.linux.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Download platform release assets
