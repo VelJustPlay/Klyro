@@ -113,6 +113,7 @@ jobs:
           Categories=Network;WebBrowser;
           Terminal=false
           EOF
+          cp AppDir/usr/share/applications/Klyro.desktop AppDir/Klyro.desktop
           curl --fail --location --retry 3 \
             https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
             --output appimagetool
