@@ -1,4 +1,4 @@
-name: Publish Klyro Windows release
+name: Publish Klyro release
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  publish:
+  windows:
     runs-on: windows-latest
     steps:
       - name: Check out source
@@ -56,12 +56,151 @@ jobs:
             --outputDir Releases
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: klyro-windows
+          path: Releases/*
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install WebKitGTK runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libgtk-3-0 libwebkit2gtk-4.1-0 libsoup-3.0-0
+
+      - name: Publish Linux x64 build
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must contain a semantic version, for example v1.0.1." >&2
+            exit 1
+          fi
+          dotnet publish Klyro.CrossPlatform/Klyro.CrossPlatform.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            --output publish/linux-x64 \
+            "-p:Version=$version" \
+            "-p:AssemblyVersion=$version.0" \
+            "-p:FileVersion=$version.0"
+
+      - name: Package Linux AppImage
+        run: |
+          mkdir -p AppDir/usr/lib/Klyro AppDir/usr/share/applications
+          cp -a publish/linux-x64/. AppDir/usr/lib/Klyro/
+          cat > AppDir/AppRun <<'EOF'
+          #!/bin/sh
+          APPDIR="$(dirname "$(readlink -f "$0")")"
+          exec "$APPDIR/usr/lib/Klyro/Klyro" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+          cat > AppDir/usr/share/applications/Klyro.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Klyro
+          Exec=Klyro
+          Categories=Network;WebBrowser;
+          Terminal=false
+          EOF
+          curl --fail --location --retry 3 \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
+            --output appimagetool
+          chmod +x appimagetool
+          ./appimagetool --appimage-extract-and-run AppDir Klyro-linux-x86_64.AppImage
+
+      - name: Upload Linux release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: klyro-linux
+          path: Klyro-linux-x86_64.AppImage
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build macOS application bundles
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must contain a semantic version, for example v1.0.1." >&2
+            exit 1
+          fi
+
+          for rid in osx-x64 osx-arm64; do
+            dotnet publish Klyro.CrossPlatform/Klyro.CrossPlatform.csproj \
+              --configuration Release \
+              --runtime "$rid" \
+              --self-contained true \
+              --output "publish/$rid" \
+              "-p:Version=$version" \
+              "-p:AssemblyVersion=$version.0" \
+              "-p:FileVersion=$version.0"
+
+            bundle="Klyro-$rid.app"
+            mkdir -p "$bundle/Contents/MacOS"
+            cp -a "publish/$rid/." "$bundle/Contents/MacOS/"
+            chmod +x "$bundle/Contents/MacOS/Klyro"
+            cat > "$bundle/Contents/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Klyro</string>
+            <key>CFBundleDisplayName</key><string>Klyro Browser</string>
+            <key>CFBundleIdentifier</key><string>com.klyro.browser</string>
+            <key>CFBundleVersion</key><string>VERSION_PLACEHOLDER</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleExecutable</key><string>Klyro</string>
+          </dict>
+          </plist>
+          EOF
+            sed -i '' "s/VERSION_PLACEHOLDER/$version/" "$bundle/Contents/Info.plist"
+            ditto -c -k --sequesterRsrc --keepParent "$bundle" "Klyro-macos-${rid#osx-}.zip"
+          done
+
+      - name: Upload macOS release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: klyro-macos
+          path: Klyro-macos-*.zip
+          if-no-files-found: error
+
+  release:
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download platform release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: klyro-*
+          path: Releases
+          merge-multiple: true
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: pwsh
+        shell: bash
         run: |
-          $assets = Get-ChildItem Releases -File | ForEach-Object { $_.FullName }
-          gh release create $env:GITHUB_REF_NAME $assets `
-            --title "Klyro $($env:GITHUB_REF_NAME)" `
+          gh release create "$GITHUB_REF_NAME" Releases/* \
+            --title "Klyro $GITHUB_REF_NAME" \
             --generate-notes

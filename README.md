@@ -1,18 +1,23 @@
 # Klyro Browser
 
-Klyro is currently available for Windows. Linux is in development and macOS is deferred.
+Klyro is a desktop browser for Windows, Linux, and macOS.
 
 ## Downloads
 
-Download the **[Windows 10/11 (x64) installer](https://github.com/VelJustPlay/Klyro/releases/latest/download/Klyro-win-Setup.exe)**. Windows 10 and 11 use the same build. Klyro requires the Microsoft Edge WebView2 Runtime; install the [Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) if it is not already present.
+Get the latest platform build from [GitHub Releases](https://github.com/VelJustPlay/Klyro/releases/latest):
 
-Linux is still being developed and macOS is deferred. They are not available as downloads yet.
+- **Windows 10/11 (x64):** [Installer](https://github.com/VelJustPlay/Klyro/releases/latest/download/Klyro-win-Setup.exe). Both Windows versions use the same build. Windows requires the Microsoft Edge WebView2 Runtime; install the [Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) if it is not already present.
+- **Linux (x64):** [AppImage](https://github.com/VelJustPlay/Klyro/releases/latest/download/Klyro-linux-x86_64.AppImage). The system must provide GTK 3, WebKitGTK 4.1, and libsoup 3. On Debian/Ubuntu, install `libgtk-3-0 libwebkit2gtk-4.1-0 libsoup-3.0-0`.
+- **macOS (Apple silicon):** [arm64 app bundle](https://github.com/VelJustPlay/Klyro/releases/latest/download/Klyro-macos-arm64.zip).
+- **macOS (Intel):** [x64 app bundle](https://github.com/VelJustPlay/Klyro/releases/latest/download/Klyro-macos-x64.zip).
 
-Blank tabs do not start a browser engine, and closing a Windows tab releases its WebView2 control. Total RAM still depends largely on the pages and browser-engine processes in use, so it has no fixed minimum.
+The current `v1.1.2` release contains Windows downloads only. Linux and macOS assets will be available after the cross-platform build is published in a new tagged release.
+
+macOS builds are not signed or notarized. macOS may require you to approve the app in Privacy & Security before opening it.
 
 ## Updates
 
-The in-app updater is available in Velopack-installed Windows copies. Standalone `.exe` copies cannot self-update; run the installer once and use the installed Klyro shortcut to receive in-app updates. Linux and macOS downloads are not available yet.
+The in-app updater is available in Velopack-installed Windows copies. Standalone `.exe` copies cannot self-update; run the installer once and use the installed Klyro shortcut to receive in-app updates. Linux and macOS builds are updated by downloading a newer release.
 
 ## Workspaces
 
@@ -30,6 +35,6 @@ The C# workspace is available in the Windows desktop app. It creates a console p
    git push origin v1.1.2
    ```
 
-3. GitHub Actions builds and publishes the Windows installer and update packages as a GitHub Release. Windows installed copies check for updates at startup and every six hours; the installed version is always shown in the bottom-left status bar, and an update button appears only when a newer version is available.
+3. GitHub Actions builds the Windows installer, Linux AppImage, and macOS arm64/x64 bundles, then publishes them together as a GitHub Release. Windows installed copies check for updates at startup and every six hours; when one is available, the **Update available** button appears in the browser's status bar.
 
 Use the first number for major releases, the middle number for larger updates (0–99), and the last number for small fixes (0–999). SemVer rejects leading zeroes, so use `1.1.2`, not `1.01.2`. The release tag must increase from the previous release.

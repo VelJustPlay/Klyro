@@ -6,7 +6,6 @@ using System.Diagnostics;
 using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.Highlighting;
 using System.Net.Http;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
@@ -87,22 +86,6 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        VersionText.Text = $"Klyro {GetDisplayVersion()}";
-    }
-
-    private static string GetDisplayVersion()
-    {
-        var informationalVersion = typeof(MainWindow).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        if (!string.IsNullOrWhiteSpace(informationalVersion))
-        {
-            var metadataIndex = informationalVersion.IndexOf('+');
-            return metadataIndex >= 0
-                ? informationalVersion[..metadataIndex]
-                : informationalVersion;
-        }
-
-        return typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown";
     }
 
     private void MinimizeWindow_Click(object sender, RoutedEventArgs e) =>
@@ -225,41 +208,21 @@ public partial class MainWindow : Window
 
     private async Task CheckForUpdatesAsync()
     {
-        if (_isUpdateCheckInProgress)
-            return;
-
-        _availableUpdate = null;
-        UpdateButton.Visibility = Visibility.Collapsed;
-        if (!_updateManager.IsInstalled)
+        if (!_updateManager.IsInstalled || _isUpdateCheckInProgress)
             return;
 
         _isUpdateCheckInProgress = true;
         try
         {
-            var update = await _updateManager.CheckForUpdatesAsync();
-            if (update is null)
-                return;
-
-            var installedVersion = _updateManager.CurrentVersion;
-            if (installedVersion is null)
-            {
-                StatusText.Text = "Could not determine the installed Klyro version.";
-                return;
-            }
-
-            if (update.TargetFullRelease.Version.CompareTo(installedVersion) <= 0)
-                return;
-
-            _availableUpdate = update;
-            var version = FormatKlyroVersion(update.TargetFullRelease.Version);
-            UpdateButtonLabel.Text = $"Update to {version}";
-            UpdateButton.ToolTip = $"Download and install Klyro {version}";
-            UpdateButton.Visibility = Visibility.Visible;
+            _availableUpdate = await _updateManager.CheckForUpdatesAsync();
+            UpdateButton.Visibility = _availableUpdate is null ? Visibility.Collapsed : Visibility.Visible;
+            if (_availableUpdate is not null)
+                UpdateButton.ToolTip = $"Download and install Klyro {_availableUpdate.TargetFullRelease.Version}";
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or
                                            TaskCanceledException or FormatException or InvalidOperationException or
                                            AcquireLockFailedException or ChecksumFailedException or
-                                           NotInstalledException or UnauthorizedAccessException or Win32Exception)
+                                           NotInstalledException)
         {
             StatusText.Text = $"Could not check for updates: {exception.Message}";
         }
@@ -269,12 +232,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private static string FormatKlyroVersion(SemanticVersion version)
-    {
-        var formattedVersion = $"{version.Major}.{version.Minor:D2}.{version.Patch}";
-        return version.IsPrerelease ? $"{formattedVersion}-{version.Release}" : formattedVersion;
-    }
-
     private async void UpdateButton_Click(object sender, RoutedEventArgs e)
     {
         if (_availableUpdate is null || _isUpdateInstallInProgress)
@@ -282,7 +239,7 @@ public partial class MainWindow : Window
 
         _isUpdateInstallInProgress = true;
         UpdateButton.IsEnabled = false;
-        UpdateButtonLabel.Text = "Downloading update...";
+        UpdateButton.Content = "Downloading update...";
         try
         {
             await _updateManager.DownloadUpdatesAsync(_availableUpdate);
@@ -292,15 +249,12 @@ public partial class MainWindow : Window
         catch (Exception exception) when (exception is HttpRequestException or IOException or
                                            TaskCanceledException or FormatException or InvalidOperationException or
                                            AcquireLockFailedException or ChecksumFailedException or
-                                           NotInstalledException or UnauthorizedAccessException or Win32Exception)
+                                           NotInstalledException)
         {
-            var version = FormatKlyroVersion(_availableUpdate.TargetFullRelease.Version);
             StatusText.Text = $"Could not install update: {exception.Message}";
-            UpdateButtonLabel.Text = $"Update to {version}";
+            UpdateButton.Content = "Update available";
             UpdateButton.IsEnabled = true;
             _isUpdateInstallInProgress = false;
-            MessageBox.Show(this, $"Could not install Klyro {version}: {exception.Message}",
-                "Klyro update failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -447,15 +401,13 @@ public partial class MainWindow : Window
             try
             {
                 await EnsureBrowserInitializedAsync(tab);
-                if (!tab.IsClosing && _browserTabs.Contains(tab) &&
-                    tab.WebView is { } webView &&
+                if (tab.WebView is { } webView &&
                     Uri.TryCreate(tab.PendingAddress, UriKind.Absolute, out var initialUri))
                     webView.Source = initialUri;
             }
             catch (Exception exception)
             {
-                if (!tab.IsClosing)
-                    StatusText.Text = DescribeBrowserEngineError(exception);
+                StatusText.Text = DescribeBrowserEngineError(exception);
             }
         }
         else
@@ -1397,8 +1349,9 @@ public partial class MainWindow : Window
         };
         output.Document.Blocks.Add(paragraph);
         while (output.Document.Blocks.Count > 1 &&
-               new TextRange(output.Document.ContentStart, output.Document.ContentEnd).Text.Length >
-               MaxTerminalOutputCharacters)
+               (output.Document.Blocks.Count > MaxTerminalOutputLines ||
+                new TextRange(output.Document.ContentStart, output.Document.ContentEnd).Text.Length >
+                MaxTerminalOutputCharacters))
         {
             if (output.Document.Blocks.FirstBlock is not { } firstBlock)
                 break;
@@ -1923,11 +1876,7 @@ public partial class MainWindow : Window
         if (tab.WebView is null)
         {
             tab.WebView = new WebView2();
-            tab.WebView.CoreWebView2InitializationCompleted += (_, args) =>
-            {
-                if (!tab.IsClosing)
-                    ConfigureBrowser(tab, args);
-            };
+            tab.WebView.CoreWebView2InitializationCompleted += (_, args) => ConfigureBrowser(tab, args);
         }
 
         if (!BrowserHost.Children.Contains(tab.WebView))
@@ -1937,7 +1886,7 @@ public partial class MainWindow : Window
         var initializationTask = tab.InitializationTask;
         if (initializationTask is null)
         {
-            initializationTask = InitializeBrowserTabAsync(webView, tab.InitializationCancellation.Token);
+            initializationTask = InitializeBrowserTabAsync(webView);
             tab.InitializationTask = initializationTask;
         }
 
@@ -1953,10 +1902,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task InitializeBrowserTabAsync(WebView2 webView, CancellationToken cancellationToken)
+    private async Task InitializeBrowserTabAsync(WebView2 webView)
     {
-        await WaitForWebViewLoadedAsync(webView, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
+        await WaitForWebViewLoadedAsync(webView);
         var environmentTask = _environmentTask ??= CreateBrowserEnvironmentAsync();
         try
         {
@@ -1969,7 +1917,6 @@ public partial class MainWindow : Window
             throw;
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
         await webView.EnsureCoreWebView2Async(_environment);
     }
 
@@ -1980,27 +1927,19 @@ public partial class MainWindow : Window
         return await CoreWebView2Environment.CreateAsync(null, profileFolder);
     }
 
-    private static Task WaitForWebViewLoadedAsync(WebView2 webView, CancellationToken cancellationToken)
+    private static Task WaitForWebViewLoadedAsync(WebView2 webView)
     {
         if (webView.IsLoaded)
             return Task.CompletedTask;
-        cancellationToken.ThrowIfCancellationRequested();
 
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         RoutedEventHandler? loadedHandler = null;
-        CancellationTokenRegistration cancellationRegistration = default;
         loadedHandler = (_, _) =>
         {
             webView.Loaded -= loadedHandler;
-            cancellationRegistration.Dispose();
             completion.TrySetResult();
         };
         webView.Loaded += loadedHandler;
-        cancellationRegistration = cancellationToken.Register(() =>
-        {
-            webView.Loaded -= loadedHandler;
-            completion.TrySetCanceled(cancellationToken);
-        });
         return completion.Task;
     }
 
@@ -2095,8 +2034,6 @@ public partial class MainWindow : Window
 
         var details = $"WebView2 initialization failed. {exception.GetType().Name}: {exception.Message} " +
                       $"HRESULT: 0x{exception.HResult:X8}. Runtime: {runtimeVersion}.";
-        if (runtimeVersion.StartsWith("not found", StringComparison.OrdinalIgnoreCase))
-            details += " Install the Microsoft Edge WebView2 Evergreen Runtime to use Klyro on this Windows installation.";
         var logPath = Path.Combine(_dataFolder, "webview2-error.log");
         try
         {
@@ -2434,11 +2371,19 @@ public partial class MainWindow : Window
             else if (navigation.IsRedirected && IsRapidSiteChange(tab))
             {
                 tab.RecentSiteChanges.Clear();
-                navigation.Cancel = true;
-                tab.NavigationDeniedMessage = $"Skipped a suspicious rapid redirect to {host}.";
-                StatusText.Text = tab.NavigationDeniedMessage;
-                UpdateAddress(tab);
-                return false;
+                var result = MessageBox.Show(this,
+                    $"This page redirected quickly to {host}. Do you want to visit this site?",
+                    "Confirm rapid redirect",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (result != MessageBoxResult.Yes)
+                {
+                    navigation.Cancel = true;
+                    tab.NavigationDeniedMessage = $"Canceled rapid redirect to {host}.";
+                    StatusText.Text = tab.NavigationDeniedMessage;
+                    UpdateAddress(tab);
+                    return false;
+                }
             }
 
             tab.CurrentSiteHost = host;
@@ -2718,7 +2663,6 @@ public partial class MainWindow : Window
         var favicon = new BitmapImage();
         favicon.BeginInit();
         favicon.CacheOption = BitmapCacheOption.OnLoad;
-        favicon.DecodePixelWidth = 32;
         favicon.StreamSource = faviconStream;
         favicon.EndInit();
         favicon.Freeze();
@@ -2811,10 +2755,10 @@ public partial class MainWindow : Window
         if (tab.IsCode && !StopCodeProcesses(tab))
             return;
 
-        tab.IsClosing = true;
         var duration = MotionDuration(140);
         if (duration != TimeSpan.Zero)
         {
+            tab.IsClosing = true;
             tab.CloseButton.IsEnabled = false;
             var fadeOut = new DoubleAnimation(tab.Item.Opacity, 0, duration)
             {
@@ -2833,15 +2777,7 @@ public partial class MainWindow : Window
 
     private void RemoveTab(BrowserTab tab)
     {
-        tab.IsClosing = true;
-        tab.InitializationCancellation.Cancel();
-        if (tab.WebView is { } webView)
-        {
-            BrowserHost.Children.Remove(webView);
-            tab.WebView = null;
-            webView.Dispose();
-        }
-        tab.InitializationCancellation.Dispose();
+        BrowserHost.Children.Remove(tab.WebView);
         if (tab.NotesPanel is not null)
             BrowserHost.Children.Remove(tab.NotesPanel);
         if (tab.CodePanel is not null)
@@ -3415,7 +3351,6 @@ public partial class MainWindow : Window
         public Process? CodePublishProcess { get; set; }
         public WebView2? WebView { get; set; }
         public Task? InitializationTask { get; set; }
-        public CancellationTokenSource InitializationCancellation { get; } = new();
         public bool IsClosing { get; set; }
     }
 

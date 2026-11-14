@@ -167,17 +167,6 @@ public sealed class MainWindow : Window
     private void CreateTab(string? address = null)
     {
         var tab = new BrowserTab();
-        tab.Content = tab.BrowserHost = new Grid();
-        AddTab(tab);
-        if (!string.IsNullOrWhiteSpace(address))
-            Navigate(address);
-    }
-
-    private NativeWebView EnsureWebView(BrowserTab tab)
-    {
-        if (tab.WebView is { } existing)
-            return existing;
-
         var view = new NativeWebView();
         tab.WebView = view;
         view.NavigationStarted += (_, _) => SetStatus("Loading...");
@@ -203,8 +192,11 @@ public sealed class MainWindow : Window
             }
         };
         view.AdapterCreated += (_, _) => SetStatus("Native web engine ready.");
-        tab.BrowserHost!.Children.Add(view);
-        return view;
+        tab.Content = tab.BrowserHost = new Grid();
+        tab.BrowserHost.Children.Add(view);
+        AddTab(tab);
+        if (!string.IsNullOrWhiteSpace(address))
+            Navigate(address);
     }
 
     private void CreateNotesTab()
@@ -280,8 +272,6 @@ public sealed class MainWindow : Window
         _tabs.Remove(tab);
         if (tab.Header is { } header)
             _tabHeaders.Children.Remove(header);
-        tab.WebView = null;
-        tab.BrowserHost?.Children.Clear();
         _pageHost.Children.Remove(tab.Content!);
         if (_tabs.Count == 0)
             CreateTab();
@@ -322,10 +312,9 @@ public sealed class MainWindow : Window
             if (_selectedTab.LocalResults is not null)
             {
                 _selectedTab.LocalResults.IsVisible = false;
-                if (_selectedTab.WebView is { } existing)
-                    existing.IsVisible = true;
+                _selectedTab.WebView!.IsVisible = true;
             }
-            EnsureWebView(_selectedTab).Navigate(target);
+            _selectedTab.WebView!.Navigate(target);
             _selectedTab.Address = target.AbsoluteUri;
             _address.Text = target.AbsoluteUri;
         }
