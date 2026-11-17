@@ -306,7 +306,7 @@
                    KeyDown="AddressBox_KeyDown" />
           <StackPanel Grid.Column="2" Orientation="Horizontal">
             <Button Width="34" Height="32" Padding="0" Margin="0,0,4,0" Click="Downloads_Click"
-                    ToolTip="Show downloads" AutomationProperties.Name="Show downloads">
+                    ToolTip="Show download history" AutomationProperties.Name="Show download history">
               <Path Data="M 12,2 L 12,14 M 7,9 L 12,14 L 17,9 M 4,18 L 20,18"
                     Width="18" Height="18" Stretch="Uniform" Stroke="{DynamicResource PrimaryTextBrush}"
                     StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
@@ -348,11 +348,15 @@
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
           <Button DockPanel.Dock="Right" Content="×" Padding="8,2" Click="HideDownloads_Click"
                   ToolTip="Hide downloads" />
-          <TextBlock Text="Downloads" FontWeight="SemiBold" FontSize="13"
+          <TextBlock Text="Download history" FontWeight="SemiBold" FontSize="13"
                      Foreground="{DynamicResource PrimaryTextBrush}" VerticalAlignment="Center" />
         </DockPanel>
         <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="245">
-          <StackPanel x:Name="DownloadsList" />
+          <StackPanel x:Name="DownloadsList">
+            <TextBlock x:Name="EmptyDownloadsText" Text="No downloads yet"
+                       Foreground="{DynamicResource MutedTextBrush}" FontSize="11"
+                       Margin="0,8,0,4" />
+          </StackPanel>
         </ScrollViewer>
       </DockPanel>
     </Border>

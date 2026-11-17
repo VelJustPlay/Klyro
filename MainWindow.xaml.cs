@@ -47,9 +47,11 @@ public partial class MainWindow : Window
     private readonly List<BrowserTab> _browserTabs = [];
     private readonly HashSet<string> _listedNoteDownloads = new(StringComparer.OrdinalIgnoreCase);
     private readonly ObservableCollection<BrowserHistoryEntry> _history = [];
+    private readonly List<DownloadHistoryEntry> _downloadHistory = [];
     private readonly string _dataFolder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LightBrowser");
     private string HistoryFilePath => Path.Combine(_dataFolder, "history.json");
+    private string DownloadsFilePath => Path.Combine(_dataFolder, "downloads.json");
     private string CSharpWorkspacePath => Path.Combine(_dataFolder, "CSharpWorkspace");
     private string CSharpProjectPath => Path.Combine(CSharpWorkspacePath, "Klyro.Code.csproj");
     private string CSharpProgramPath => Path.Combine(CSharpWorkspacePath, "Program.cs");
@@ -145,6 +147,7 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(_dataFolder);
             LoadHistory();
+            LoadDownloadHistory();
             try
             {
                 _searchIndex = new KlyroSearchIndex(_dataFolder);
@@ -1367,6 +1370,7 @@ public partial class MainWindow : Window
 
     private void AddCompletedFileToDownloads(string filePath)
     {
+        RecordDownloadHistory(filePath, "Saved", 0);
         var nameText = new TextBlock
         {
             Text = Path.GetFileName(filePath),
@@ -1685,6 +1689,7 @@ public partial class MainWindow : Window
         if (!_listedNoteDownloads.Add(filePath))
             return;
 
+        RecordDownloadHistory(filePath, "Saved", 0);
         var nameText = new TextBlock
         {
             Text = Path.GetFileName(filePath),
@@ -2050,6 +2055,7 @@ public partial class MainWindow : Window
 
     private void TrackDownload(CoreWebView2DownloadOperation operation, string filePath)
     {
+        var historyEntry = RecordDownloadHistory(filePath, "Downloading", 0);
         var nameText = new TextBlock
         {
             Text = Path.GetFileName(filePath),
@@ -2090,7 +2096,7 @@ public partial class MainWindow : Window
         AnimateDownloadPanel(true);
         AnimateElementIn(row, 8, 190);
 
-        var download = new BrowserDownload(operation, filePath, stateText, progressBar, openButton);
+        var download = new BrowserDownload(operation, filePath, stateText, progressBar, openButton, historyEntry);
         openButton.Click += (_, _) => OpenDownloadedFile(download);
         operation.BytesReceivedChanged += (_, _) => Dispatcher.BeginInvoke(
             () => UpdateDownloadProgress(download));
@@ -2153,11 +2159,13 @@ public partial class MainWindow : Window
                 download.ProgressBar.IsIndeterminate = false;
                 download.ProgressBar.Value = 100;
                 download.OpenButton.Visibility = Visibility.Visible;
+                UpdateDownloadHistory(download, "Complete", receivedBytes);
                 break;
             case CoreWebView2DownloadState.Interrupted:
                 download.StateText.Text = $"Download failed: {operation.InterruptReason}";
                 download.ProgressBar.IsIndeterminate = false;
                 StatusText.Text = $"Download failed: {download.FilePath}";
+                UpdateDownloadHistory(download, $"Failed: {operation.InterruptReason}", receivedBytes);
                 break;
         }
     }
@@ -2170,6 +2178,114 @@ public partial class MainWindow : Window
     private void OpenDownloadedFile(BrowserDownload download)
     {
         OpenFile(download.FilePath, download.StateText);
+    }
+
+    private DownloadHistoryEntry RecordDownloadHistory(string filePath, string status, long sizeBytes)
+    {
+        var entry = new DownloadHistoryEntry(DateTimeOffset.Now, filePath, status, sizeBytes);
+        EmptyDownloadsText.Visibility = Visibility.Collapsed;
+        _downloadHistory.Insert(0, entry);
+        if (_downloadHistory.Count > 500)
+            _downloadHistory.RemoveRange(500, _downloadHistory.Count - 500);
+        SaveDownloadHistory();
+        return entry;
+    }
+
+    private void UpdateDownloadHistory(BrowserDownload download, string status, long sizeBytes)
+    {
+        if (download.HistoryEntry.Status == status && download.HistoryEntry.SizeBytes == sizeBytes)
+            return;
+
+        download.HistoryEntry.Status = status;
+        download.HistoryEntry.SizeBytes = sizeBytes;
+        SaveDownloadHistory();
+    }
+
+    private void SaveDownloadHistory()
+    {
+        try
+        {
+            File.WriteAllText(DownloadsFilePath, JsonSerializer.Serialize(_downloadHistory));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            StatusText.Text = $"Could not save download history: {exception.Message}";
+        }
+    }
+
+    private void LoadDownloadHistory()
+    {
+        if (!File.Exists(DownloadsFilePath))
+            return;
+
+        try
+        {
+            var storedHistory = JsonSerializer.Deserialize<List<DownloadHistoryEntry>>(
+                File.ReadAllText(DownloadsFilePath));
+            if (storedHistory is null)
+                return;
+
+            _downloadHistory.AddRange(storedHistory
+                .OrderByDescending(entry => entry.DownloadedAt)
+                .Take(500));
+            if (_downloadHistory.Count > 0)
+                EmptyDownloadsText.Visibility = Visibility.Collapsed;
+
+            foreach (var entry in _downloadHistory)
+            {
+                if (entry.Status == "Downloading")
+                    entry.Status = "Interrupted (browser closed)";
+            }
+
+            foreach (var entry in _downloadHistory.OrderBy(entry => entry.DownloadedAt))
+                DownloadsList.Children.Insert(0, CreateDownloadHistoryRow(entry));
+
+            if (_downloadHistory.Any(entry => entry.Status == "Interrupted (browser closed)"))
+                SaveDownloadHistory();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           JsonException)
+        {
+            StatusText.Text = $"Could not load download history: {exception.Message}";
+        }
+    }
+
+    private StackPanel CreateDownloadHistoryRow(DownloadHistoryEntry entry)
+    {
+        var nameText = new TextBlock
+        {
+            Text = Path.GetFileName(entry.FilePath),
+            Foreground = (Brush)FindResource("PrimaryTextBrush"),
+            FontWeight = FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var stateText = new TextBlock
+        {
+            Text = entry.SizeBytes > 0 && entry.Status == "Complete"
+                ? $"{entry.Status} — {FormatDownloadSize(entry.SizeBytes)} — {entry.DownloadedAt.LocalDateTime:g}"
+                : $"{entry.Status} — {entry.DownloadedAt.LocalDateTime:g}",
+            Foreground = (Brush)FindResource("MutedTextBrush"),
+            FontSize = 11,
+            Margin = new Thickness(0, 3, 0, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var row = new StackPanel { Margin = new Thickness(0, 4, 0, 8) };
+        var heading = new DockPanel();
+        if ((entry.Status is "Complete" or "Saved") && File.Exists(entry.FilePath))
+        {
+            var openButton = new Button
+            {
+                Content = "Open",
+                Padding = new Thickness(8, 2, 8, 2)
+            };
+            DockPanel.SetDock(openButton, Dock.Right);
+            heading.Children.Add(openButton);
+            openButton.Click += (_, _) => OpenFile(entry.FilePath, stateText);
+        }
+        heading.Children.Add(nameText);
+        row.Children.Add(heading);
+        row.Children.Add(stateText);
+        return row;
     }
 
     private static TimeSpan MotionDuration(int milliseconds) =>
@@ -3199,12 +3315,33 @@ public partial class MainWindow : Window
 
     private sealed record BrowserHistoryEntry(DateTimeOffset VisitedAt, string Title, string Address);
 
+    private sealed class DownloadHistoryEntry
+    {
+        public DateTimeOffset DownloadedAt { get; set; }
+        public string FilePath { get; set; } = "";
+        public string Status { get; set; } = "";
+        public long SizeBytes { get; set; }
+
+        public DownloadHistoryEntry()
+        {
+        }
+
+        public DownloadHistoryEntry(DateTimeOffset downloadedAt, string filePath, string status, long sizeBytes)
+        {
+            DownloadedAt = downloadedAt;
+            FilePath = filePath;
+            Status = status;
+            SizeBytes = sizeBytes;
+        }
+    }
+
     private sealed record BrowserDownload(
         CoreWebView2DownloadOperation Operation,
         string FilePath,
         TextBlock StateText,
         ProgressBar ProgressBar,
-        Button OpenButton);
+        Button OpenButton,
+        DownloadHistoryEntry HistoryEntry);
 
     private sealed class BrowserSettingsWindow : Window
     {
